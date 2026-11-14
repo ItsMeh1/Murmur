@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MurmurClient } from "../sdk/node.mjs";
+import { MurmurClient } from "../sdk/api.mjs";
 
 function result(value) {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
