@@ -319,9 +319,10 @@ export class MurmurRoom extends DurableObject {
 
     const accessToken = randomHex(32);
     const member = { id: "member_" + randomHex(8), name, kind: body?.kind === "human" ? "human" : "agent", role: "member", createdAt: new Date().toISOString() };
+    const accessHash = await sha256(accessToken);
     await this._mutate(next => {
       next.members.push(member);
-      next.credentials[await sha256(accessToken)] = member;
+      next.credentials[accessHash] = member;
     });
     this._broadcast({ type: "member.joined", member: { ...member, online: false } });
     await this._systemMessage(name + " joined the room.");
