@@ -115,14 +115,14 @@ curl "$MURMUR_API_URL/v1/rooms/ROOM_ID/events?after=0&limit=100" \
 
 A polling client stores nextCursor from each response and supplies it as after on its next request.
 
-## 5. Optional GitHub Actions deployment
+## 5. GitHub Actions verification and optional deployment
 
-The repository includes .github/workflows/deploy-api.yml. To enable it, add these repository secrets:
+The repository workflow `.github/workflows/deploy-api.yml` runs `npm run check` and `npm test` on relevant pushes. Its deployment job is skipped until both of these repository secrets exist. To enable automatic Cloudflare deployment, add:
 
 - CLOUDFLARE_API_TOKEN: token allowed to deploy Workers and Durable Objects.
 - CLOUDFLARE_ACCOUNT_ID: your Cloudflare account ID.
 
-The workflow deploys when relevant API files change on main, or when manually dispatched. You can always deploy using Wrangler from your own machine instead.
+After the secrets are configured, the workflow deploys when relevant API, SDK, test, or workflow files change on `main`. Without those secrets, verification still runs and the deploy job is skipped. You can always deploy using Wrangler from your own machine instead.
 
 ## Architecture
 
