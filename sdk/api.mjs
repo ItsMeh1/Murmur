@@ -1,38 +1,56 @@
 import { EventEmitter } from "node:events";
+import { randomUUID } from "node:crypto";
 
+/**
+ * Provider-neutral Murmur HTTP/JSON + WebSocket SDK for Node.js 22+.
+ * Any language can use the same documented REST endpoints without this SDK.
+ */
 export class MurmurClient extends EventEmitter {
-  constructor({ apiBase = process.env.MURMUR_API_URL || "" } = {}) {
+  constructor({ apiBase = process.env.MURMUR_API_URL || "", fetchImpl = globalThis.fetch } = {}) {
     super();
-    this.apiBase = apiBase.replace(/\/+$/, "");
+    this.apiBase = String(apiBase).replace(/\/+$/, "");
+    this.fetch = fetchImpl;
     this.room = null;
-    this.accessToken = null;
     this.inviteToken = null;
+    this.accessToken = null;
     this.participant = null;
     this.members = [];
     this.history = [];
+    this.cursor = 0;
     this.connected = false;
-    this.socket = null;
     this.isHost = false;
+    this.socket = null;
+    this._closing = false;
   }
 
   async request(path, { method = "GET", body } = {}) {
-    if (!this.apiBase) throw new Error("Set MURMUR_API_URL.");
+    if (!this.apiBase) throw new Error("Set MURMUR_API_URL to your Murmur API base URL.");
     const headers = { accept: "application/json" };
     if (this.accessToken) headers.authorization = "Bearer " + this.accessToken;
     if (body !== undefined) headers["content-type"] = "application/json";
-    const response = await fetch(this.apiBase + path, {
-      method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {})
+    const response = await this.fetch(this.apiBase + path, {
+      method,
+      headers,
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {})
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.error?.message || ("Murmur API HTTP " + response.status));
+    if (!response.ok) {
+      throw new Error(data?.error?.message || data?.message || ("Murmur API HTTP " + response.status));
+    }
     return data;
   }
 
   async openSocket() {
-    if (typeof WebSocket !== "function") throw new Error("Node.js 22+ with global WebSocket is required.");
-    const ticket = await this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/connect-ticket", { method: "POST", body: {} });
+    if (typeof globalThis.WebSocket !== "function") {
+      throw new Error("This Node runtime has no global WebSocket. Use the REST events endpoint for polling.");
+    }
+    const ticket = await this.request(
+      "/v1/rooms/" + encodeURIComponent(this.room) + "/connect-ticket",
+      { method: "POST", body: {} }
+    );
     const url = new URL(this.apiBase + "/v1/rooms/" + encodeURIComponent(this.room) + "/connect");
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+
     return new Promise((resolve, reject) => {
       const socket = new WebSocket(url, ["murmur.v1", "ticket." + ticket.ticket]);
       this.socket = socket;
@@ -43,117 +61,246 @@ export class MurmurClient extends EventEmitter {
         socket.close();
         reject(new Error("Timed out connecting to Murmur."));
       }, 20000);
+
       socket.addEventListener("message", event => {
         let payload;
-        try { payload = JSON.parse(String(event.data)); }
-        catch { this.emit("error", new Error("Invalid JSON from Murmur.")); return; }
+        try {
+          payload = JSON.parse(String(event.data));
+        } catch {
+          this.emit("clientError", new Error("Murmur sent invalid JSON."));
+          return;
+        }
         if (payload.type === "welcome") {
           this.connected = true;
           this.participant = payload.participant;
           this.members = payload.members || [];
           this.history = payload.history || [];
+          this.cursor = Number(payload.cursor) || 0;
           this.emit("event", payload);
-          if (!settled) { settled = true; clearTimeout(timer); resolve(this); }
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            resolve(this);
+          }
           return;
         }
         this.receive(payload);
       });
+
       socket.addEventListener("error", () => {
-        if (!settled) { settled = true; clearTimeout(timer); reject(new Error("Murmur WebSocket connection failed.")); }
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(new Error("Murmur WebSocket connection failed."));
+        }
       });
+
       socket.addEventListener("close", event => {
-        const active = this.connected;
+        const wasConnected = this.connected;
         this.connected = false;
-        if (!settled) { settled = true; clearTimeout(timer); reject(new Error("Socket closed before welcome (" + event.code + ").")); }
-        if (active) this.emit("disconnected", { code: event.code });
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(new Error("Socket closed before welcome (" + event.code + ")."));
+        }
+        if (wasConnected) this.emit("disconnected", { code: event.code });
       });
     });
   }
 
   async createRoom({ name = "You" } = {}) {
-    const data = await this.request("/v1/rooms", { method: "POST", body: { name } });
+    const data = await this.request("/v1/rooms", {
+      method: "POST",
+      body: { name }
+    });
     this.room = data.roomId;
     this.inviteToken = data.inviteCode;
     this.accessToken = data.accessToken;
     this.participant = data.member;
     this.isHost = true;
     await this.openSocket();
-    return { roomId: this.room, inviteToken: this.inviteToken, accessToken: this.accessToken, participant: this.participant };
+    return {
+      roomId: this.room,
+      inviteCode: this.inviteToken,
+      inviteToken: this.inviteToken,
+      accessToken: this.accessToken,
+      participant: this.participant
+    };
   }
 
   async connect({ room, token, name, kind = "agent" }) {
+    if (!room || !token || !name) throw new Error("Room ID, invite code and name are required.");
     const data = await this.request("/v1/rooms/" + encodeURIComponent(room) + "/join", {
-      method: "POST", body: { inviteCode: token, name, kind }
+      method: "POST",
+      body: { inviteCode: token, name, kind }
     });
     this.room = data.roomId;
     this.inviteToken = token;
     this.accessToken = data.accessToken;
     this.participant = data.member;
+    this.isHost = false;
+    await this.openSocket();
+    return this;
+  }
+
+  async resume({ room, accessToken, inviteCode } = {}) {
+    if (!room || !accessToken) throw new Error("Room ID and access token are required.");
+    this.room = room;
+    this.accessToken = accessToken;
+    this.inviteToken = inviteCode || null;
+    const snapshot = await this.request("/v1/rooms/" + encodeURIComponent(room));
+    this.participant = snapshot.participant;
+    this.members = snapshot.members || [];
+    this.isHost = snapshot.participant?.role === "owner";
+    await this.getHistory({ limit: 200 });
     await this.openSocket();
     return this;
   }
 
   receive(event) {
     if (!event || typeof event.type !== "string") return;
-    this.emit("event", event);
-    this.emit(event.type, event);
+    this.cursor = Math.max(this.cursor, Number(event.cursor) || Number(event.message?.cursor) || 0);
+
     if (event.type === "message.created" || event.type === "widget.created") {
-      if (event.message && !this.history.some(m => m.id === event.message.id)) this.history.push(event.message);
+      if (event.message && !this.history.some(item => item.id === event.message.id)) {
+        this.history.push(event.message);
+        if (this.history.length > 1000) this.history.shift();
+      }
       this.emit(event.type === "message.created" ? "message" : "widget", event.message);
+    } else if (event.type === "widget.resolved") {
+      const message = this.history.find(item => item.id === event.id);
+      if (message?.widget) message.widget.result = event.result;
+      this.emit("widgetResolved", event);
+    } else if (event.type === "progress.updated") {
+      const message = this.history.find(item => item.id === event.id);
+      if (message?.widget) message.widget.data.percent = event.percent;
+      this.emit("progress", event);
     } else if (event.type === "members.updated" || event.type === "presence.changed") {
       this.members = event.members || [];
       this.emit("members", this.members);
-    } else if (event.type === "member.joined") this.emit("memberJoined", event.member);
-    else if (event.type === "member.left") this.emit("memberLeft", event.member);
-    else if (event.type === "widget.resolved") this.emit("widgetResolved", event);
-    else if (event.type === "progress.updated") this.emit("progress", event);
-    else if (event.type === "error") this.emit("serverError", event);
+    } else if (event.type === "member.joined") {
+      if (!this.members.some(item => item.id === event.member?.id)) this.members.push(event.member);
+      this.emit("memberJoined", event.member);
+    } else if (event.type === "member.left") {
+      this.members = this.members.filter(item => item.id !== event.member?.id);
+      this.emit("memberLeft", event.member);
+    } else if (event.type === "room.closed") {
+      this.connected = false;
+      this.emit("disconnected", { reason: "The room was closed." });
+    } else if (event.type === "error") {
+      this.emit("serverError", event);
+    }
+
+    this.emit("event", event);
   }
 
   submit(event) {
-    if (!this.connected || this.socket?.readyState !== WebSocket.OPEN) throw new Error("Not connected to Murmur.");
+    if (!this.connected || this.socket?.readyState !== WebSocket.OPEN) {
+      throw new Error("Not connected to Murmur.");
+    }
     this.socket.send(JSON.stringify(event));
   }
 
   sendMessage(text, options = {}) {
-    this.submit({ type: "message.send", text, channel: options.channel || "general", target: options.target || null });
+    this.submit({
+      type: "message.send",
+      text,
+      channel: options.channel || "general",
+      target: options.target || null
+    });
   }
+
   createWidget(widgetType, data, options = {}) {
-    const id = "widget_" + crypto.randomUUID();
+    const id = "widget_" + randomUUID();
     this.submit({ type: "widget.create", id, widgetType, data, channel: options.channel });
     return id;
   }
-  respondToWidget(id, result) { this.submit({ type: "widget.respond", id, result }); }
-  updateProgress(id, percent) { this.submit({ type: "progress.update", id, percent }); }
+
+  respondToWidget(id, result) {
+    this.submit({ type: "widget.respond", id, result });
+  }
+
+  updateProgress(id, percent) {
+    this.submit({ type: "progress.update", id, percent });
+  }
 
   async getHistory({ channel, limit = 100, after = 0 } = {}) {
-    const params = new URLSearchParams({ limit: String(limit), after: String(after) });
+    const params = new URLSearchParams({
+      limit: String(Math.max(1, Math.min(200, limit))),
+      after: String(Math.max(0, after))
+    });
     if (channel) params.set("channel", channel);
-    const data = await this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/messages?" + params);
-    this.history = data.messages || this.history;
+    const data = await this.request(
+      "/v1/rooms/" + encodeURIComponent(this.room) + "/messages?" + params
+    );
+    if (after === 0) this.history = data.messages || [];
+    else {
+      for (const message of data.messages || []) {
+        if (!this.history.some(item => item.id === message.id)) this.history.push(message);
+      }
+    }
+    this.cursor = Math.max(this.cursor, Number(data.cursor) || 0);
     return data;
   }
+
+  async getEvents({ after = 0, limit = 100 } = {}) {
+    const params = new URLSearchParams({
+      after: String(Math.max(0, after)),
+      limit: String(Math.max(1, Math.min(200, limit)))
+    });
+    return this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/events?" + params);
+  }
+
   async getMembers() {
     const data = await this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/members");
     this.members = data.members || [];
     return data;
   }
-  async getRoom() { return this.request("/v1/rooms/" + encodeURIComponent(this.room)); }
+
+  async getRoom() {
+    return this.request("/v1/rooms/" + encodeURIComponent(this.room));
+  }
 
   waitForMessage({ timeout = 0, predicate = () => true } = {}) {
     return new Promise((resolve, reject) => {
       let timer;
       const listener = message => {
-        try { if (predicate(message)) { cleanup(); resolve(message); } }
-        catch (error) { cleanup(); reject(error); }
+        try {
+          if (!predicate(message)) return;
+          cleanup();
+          resolve(message);
+        } catch (error) {
+          cleanup();
+          reject(error);
+        }
       };
-      const cleanup = () => { this.off("message", listener); if (timer) clearTimeout(timer); };
+      const cleanup = () => {
+        this.off("message", listener);
+        if (timer) clearTimeout(timer);
+      };
       this.on("message", listener);
       if (timeout > 0) timer = setTimeout(() => { cleanup(); resolve(null); }, timeout);
     });
   }
 
+  async endRoom() {
+    if (!this.isHost) throw new Error("Only the room owner can close this room.");
+    const data = await this.request("/v1/rooms/" + encodeURIComponent(this.room), { method: "DELETE" });
+    this.close();
+    return data;
+  }
+
+  async leave() {
+    const data = await this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/leave", {
+      method: "POST",
+      body: {}
+    });
+    this.close();
+    return data;
+  }
+
   close() {
+    this._closing = true;
     try { this.socket?.close(1000, "Client closed"); } catch {}
     this.socket = null;
     this.connected = false;
@@ -161,4 +308,5 @@ export class MurmurClient extends EventEmitter {
     this.emit("closed");
   }
 }
+
 export default MurmurClient;
