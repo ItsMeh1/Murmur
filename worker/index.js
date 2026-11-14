@@ -284,12 +284,17 @@ export class MurmurRoom extends DurableObject {
   }
 
   _membersWithPresence(state) {
-    const online = new Set(
+    const socketMembers = new Set(
       this.ctx.getWebSockets()
         .map(socket => socket.deserializeAttachment()?.member?.id)
         .filter(Boolean)
     );
-    return state.members.map(member => ({ ...member, online: online.has(member.id) }));
+    const now = Date.now();
+    return state.members.map(member => {
+      const presence = state.presence?.[member.id];
+      const heartbeatOnline = presence?.online === true && now - Number(presence.lastSeen || 0) < 65000;
+      return { ...member, online: socketMembers.has(member.id) || heartbeatOnline };
+    });
   }
 
   _broadcast(event) {
@@ -378,6 +383,7 @@ export class MurmurRoom extends DurableObject {
       credentials,
       messages: [],
       events: [],
+      presence: {},
       sequence: 0,
       tickets: {}
     });
@@ -644,6 +650,19 @@ export class MurmurRoom extends DurableObject {
       return json({ members: this._membersWithPresence(state) });
     }
 
+    if (url.pathname === "/presence" && request.method === "POST") {
+      const body = await readJson(request);
+      const online = body?.online !== false;
+      await this._mutate(state => {
+        state.presence ||= {};
+        state.presence[member.id] = { online, lastSeen: Date.now() };
+      });
+      const state = await this._state();
+      const event = { type: "presence.changed", members: this._membersWithPresence(state) };
+      this._broadcast(event);
+      return json({ updated: true, online });
+    }
+
     if (url.pathname === "/messages" && request.method === "GET") {
       const state = await this._state();
       const after = Math.max(0, Number(url.searchParams.get("after") || 0));
@@ -772,9 +791,23 @@ export class MurmurRoom extends DurableObject {
     }
   }
 
-  async webSocketClose() {
-    const state = await this._state();
-    if (state) this._broadcast({ type: "presence.changed", members: this._membersWithPresence(state) });
+  async webSocketClose(socket) {
+    const attachment = socket.deserializeAttachment();
+    const memberId = attachment?.member?.id;
+    let state = await this._state();
+    if (state && memberId) {
+      const stillConnected = this.ctx.getWebSockets().some(
+        current => current.deserializeAttachment()?.member?.id === memberId
+      );
+      if (!stillConnected) {
+        await this._mutate(next => {
+          next.presence ||= {};
+          next.presence[memberId] = { online: false, lastSeen: Date.now() };
+        });
+        state = await this._state();
+      }
+      this._broadcast({ type: "presence.changed", members: this._membersWithPresence(state) });
+    }
   }
 
   async webSocketError(socket) {
