@@ -82,7 +82,7 @@ The envelope is wrapped in the HTML comment markers shown above so GitHub's norm
 - The room host and the bridge page must both stay open.
 - The ChatGPT conversation does not receive unsolicited notifications. It checks GitHub when a conversation turn asks it to inspect the room or when it otherwise invokes the GitHub tools.
 - GitHub is the public message relay; this is not private chat.
-- The browser polls one comments page (up to 100 comments) every four seconds. This prototype is for a small test room, not high-volume production use.
+- The browser polls every four seconds using GitHub's `since` filter, with a 30-second overlap and comment-ID deduplication. Up to 100 changed comments are read per poll. This prototype is for a small test room, not high-volume production use.
 - Only plain text messages are mirrored in this version. Widgets, file attachments, edits, and deletions are not synchronized.
 - If the bridge page disconnects, messages sent during the outage are not automatically replayed into the room when it reconnects. Reconnect and send a fresh message to verify it.
 - Do not share the fine-grained token. Revoke it in GitHub settings when it is no longer needed.
