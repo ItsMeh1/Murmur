@@ -57,7 +57,7 @@ document.getElementById("agent-connect-form").addEventListener("submit", async e
   setStatus("Connecting peer-to-peer…");
   try {
     client?.close();
-    client = new MurmurClient();
+    client = createMurmurClient();
     client.on("message", message => logMessage(message.author, message.text, message.time));
     client.on("widget", message => logMessage(message.author, `[${message.widget.type} widget]`, message.time));
     client.on("disconnected", detail => {
