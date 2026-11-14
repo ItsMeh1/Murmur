@@ -1,0 +1,648 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Murmur API",
+    "version": "1.0.0",
+    "description": "Provider-neutral rooms and messaging API. Works with browser apps, Node.js, Python, mobile apps, AI tool calling, and MCP adapters. HTTP uses JSON; realtime uses WebSocket events."
+  },
+  "servers": [
+    {
+      "url": "https://murmur-api.YOUR_SUBDOMAIN.workers.dev",
+      "description": "Replace with your deployed Worker URL"
+    }
+  ],
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Murmur access token"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "CreateRoomRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "default": "You"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateRoomResponse": {
+        "type": "object",
+        "properties": {
+          "roomId": {
+            "type": "string"
+          },
+          "inviteCode": {
+            "type": "string"
+          },
+          "accessToken": {
+            "type": "string"
+          },
+          "member": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "roomId",
+          "inviteCode",
+          "accessToken",
+          "member"
+        ]
+      },
+      "JoinRoomRequest": {
+        "type": "object",
+        "properties": {
+          "inviteCode": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 24
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "human",
+              "agent"
+            ]
+          }
+        },
+        "required": [
+          "inviteCode",
+          "name"
+        ]
+      },
+      "JoinRoomResponse": {
+        "type": "object",
+        "properties": {
+          "roomId": {
+            "type": "string"
+          },
+          "accessToken": {
+            "type": "string"
+          },
+          "member": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "roomId",
+          "accessToken",
+          "member"
+        ]
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "integer"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "general",
+              "ideas",
+              "pending",
+              "orchestrate"
+            ]
+          },
+          "author": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "mentions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sender": {
+            "type": "object"
+          },
+          "widget": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "cursor",
+          "channel",
+          "author",
+          "text",
+          "createdAt"
+        ]
+      },
+      "SendMessageRequest": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "general",
+              "ideas",
+              "pending",
+              "orchestrate"
+            ],
+            "default": "general"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "MessageList": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "nextCursor": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "messages",
+          "total",
+          "nextCursor",
+          "cursor"
+        ]
+      },
+      "Members": {
+        "type": "object",
+        "properties": {
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "online": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "kind",
+                "role",
+                "online"
+              ]
+            }
+          }
+        },
+        "required": [
+          "members"
+        ]
+      }
+    }
+  },
+  "paths": {
+    "/v1/health": {
+      "get": {
+        "security": [],
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "API status"
+          }
+        }
+      }
+    },
+    "/v1/rooms": {
+      "post": {
+        "security": [],
+        "summary": "Create a room",
+        "description": "Returns an owner access token and a separate invite code. Store the owner token securely; share only the invite code.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRoomRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Room created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateRoomResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}/join": {
+      "post": {
+        "security": [],
+        "summary": "Join a room",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JoinRoomRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Participant token issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinRoomResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Invalid invite code"
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}": {
+      "get": {
+        "summary": "Get room metadata",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Room information"
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}/members": {
+      "get": {
+        "summary": "List room members and presence",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Members",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Members"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}/messages": {
+      "get": {
+        "summary": "Read messages",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "channel",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "general",
+                "ideas",
+                "pending",
+                "orchestrate"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Send a message",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Message accepted"
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}/widgets": {
+      "post": {
+        "summary": "Create a widget",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "widgetType": {
+                    "type": "string",
+                    "enum": [
+                      "approval",
+                      "plan",
+                      "orchestrate",
+                      "choice",
+                      "progress"
+                    ]
+                  },
+                  "data": {
+                    "type": "object"
+                  },
+                  "channel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "widgetType",
+                  "data"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Widget accepted"
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}/widgets/{widgetId}/respond": {
+      "post": {
+        "summary": "Respond to a widget",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "widgetId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "approved": {
+                    "type": "boolean"
+                  },
+                  "choice": {
+                    "type": "string"
+                  },
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response accepted"
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}/widgets/{widgetId}/progress": {
+      "post": {
+        "summary": "Update a progress widget",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "widgetId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "percent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "percent"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Progress accepted"
+          }
+        }
+      }
+    }
+  }
+}
