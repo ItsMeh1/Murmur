@@ -79,7 +79,7 @@
 
   function commentsPath() {
     return "/repos/" + CONFIG.owner + "/" + CONFIG.repo + "/issues/" + CONFIG.issue +
-      "/comments?per_page=100&sort=created&direction=asc";
+      "/comments?per_page=100&sort=created&direction=desc";
   }
 
   function makeComment(envelope) {
