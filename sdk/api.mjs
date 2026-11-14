@@ -347,14 +347,6 @@ export class MurmurClient extends EventEmitter {
 
   async getEvents({ after = 0, limit = 100 } = {}) {
     const params = new URLSearchParams({
-      after: String(Math.max(0, after)),
-      limit: String(Math.max(1, Math.min(200, limit)))
-    });
-    return this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/events?" + params);
-  }
-
-  async getEvents({ after = 0, limit = 100 } = {}) {
-    const params = new URLSearchParams({
       after: String(Math.max(0, Number(after) || 0)),
       limit: String(Math.max(1, Math.min(200, Number(limit) || 100)))
     });
@@ -365,14 +357,6 @@ export class MurmurClient extends EventEmitter {
     const data = await this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/members");
     this.members = data.members || [];
     return data;
-  }
-
-  async getEvents({ after = 0, limit = 100 } = {}) {
-    const params = new URLSearchParams({
-      after: String(Math.max(0, Number(after) || 0)),
-      limit: String(Math.max(1, Math.min(200, Number(limit) || 100)))
-    });
-    return this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/events?" + params);
   }
 
   async getRoom() {
