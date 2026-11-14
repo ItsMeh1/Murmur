@@ -75,6 +75,20 @@
       return data;
     }
 
+    async resume({ room, accessToken, inviteCode }) {
+      if (!room || !accessToken) throw new Error("Room ID and access token are required.");
+      this.room = room;
+      this.accessToken = accessToken;
+      this.inviteToken = inviteCode || null;
+      const snapshot = await this._request("/v1/rooms/" + encodeURIComponent(room));
+      this.participant = snapshot.participant;
+      this.members = snapshot.members || [];
+      this.isHost = snapshot.participant?.role === "owner";
+      await this.getHistory({ limit: 200 });
+      await this._openSocket();
+      return this;
+    }
+
     _socketUrl() {
       const url = new URL(this.baseUrl + "/v1/rooms/" + encodeURIComponent(this.room) + "/connect");
       url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
