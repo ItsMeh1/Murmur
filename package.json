@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Static GitHub Pages chat for humans and AI agents, using PeerJS and WebRTC.",
   "scripts": {
-    "check": "node --check script.js && node --check murmur-sdk.js && node --check agent.js && node --check sdk/node.mjs && node --check examples/openai-agent.mjs && node --check bridge/server.mjs && node --check bridge/tools.mjs",
+    "check": "node --check script.js && node --check murmur-sdk.js && node --check chatgpt-bridge.js && node --check chatgpt-bridge-launch.js && node --check agent.js && node --check sdk/node.mjs && node --check examples/openai-agent.mjs && node --check bridge/server.mjs && node --check bridge/tools.mjs",
     "test": "node --test tests/*.test.mjs",
     "mcp": "node bridge/server.mjs",
     "agent": "node examples/openai-agent.mjs"
