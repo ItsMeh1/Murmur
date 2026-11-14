@@ -98,12 +98,23 @@
       return url.toString();
     }
 
+    async _startHttpPolling(reason = "WebSocket unavailable") {
+      this._closing = false;
+      const snapshot = await this.getRoom();
+      this.participant = snapshot.participant;
+      this.members = snapshot.members || [];
+      this.isHost = this.participant?.role === "owner";
+      await this.getHistory({ limit: 300 });
+      this.connected = true;
+      this.emit("transportFallback", { transport: "http-polling", reason });
+      this._emitEvent({ type: "welcome", room: snapshot.room, participant: this.participant, members: this.members, history: this.history, cursor: this._cursor });
+      this._startPolling();
+      return this;
+    }
+
     async _openSocket() {
       if (typeof root.WebSocket !== "function") {
-        this.connected = true;
-        this.emit("transportFallback", { transport: "http-polling" });
-        this._startPolling();
-        return this;
+        return this._startHttpPolling("This runtime does not support WebSocket.");
       }
       const ticket = await this._request("/v1/rooms/" + encodeURIComponent(this.room) + "/connect-ticket", { method: "POST", body: {} });
       return new Promise((resolve, reject) => {
@@ -158,6 +169,14 @@
           if (wasConnected) this.emit("disconnected", { reason: "Realtime connection closed.", code: event.code });
           if (!this._closing && this.accessToken) this._scheduleReconnect();
         });
+      }).catch(async error => {
+        // REST is the canonical transport. If WebSocket is blocked, retain a
+        // functional connection using the cursor-based HTTP event feed.
+        try {
+          return await this._startHttpPolling(error.message || "WebSocket connection failed.");
+        } catch (fallbackError) {
+          throw new Error(error.message + " HTTP polling fallback also failed: " + fallbackError.message);
+        }
       });
     }
 
@@ -261,10 +280,35 @@
     }
 
     _submit(event) {
-      if (!this.connected || !this.socket || this.socket.readyState !== 1) {
-        throw new Error("Not connected to Murmur's realtime API.");
+      if (!this.connected) throw new Error("Not connected to Murmur.");
+
+      if (this.socket && this.socket.readyState === 1) {
+        this.socket.send(JSON.stringify(event));
+        return;
       }
-      this.socket.send(JSON.stringify(event));
+
+      let path;
+      let body;
+      if (event.type === "message.send") {
+        path = "/messages";
+        body = { text: event.text, channel: event.channel, target: event.target };
+      } else if (event.type === "widget.create") {
+        path = "/widgets";
+        body = { id: event.id, widgetType: event.widgetType, data: event.data, channel: event.channel };
+      } else if (event.type === "widget.respond") {
+        path = "/widgets/" + encodeURIComponent(event.id) + "/respond";
+        body = { result: event.result };
+      } else if (event.type === "progress.update") {
+        path = "/widgets/" + encodeURIComponent(event.id) + "/progress";
+        body = { percent: event.percent };
+      } else {
+        throw new Error("Unsupported HTTP event: " + event.type);
+      }
+
+      this._request("/v1/rooms/" + encodeURIComponent(this.room) + path, {
+        method: "POST",
+        body
+      }).catch(error => this.emit("serverError", { error: error.message }));
     }
 
     sendMessage(text, options = {}) {
