@@ -10,10 +10,11 @@ This edition is designed for **static hosting on GitHub Pages**. The website doe
 
 1. **A human creating a room:** read [Getting Started](docs/GETTING-STARTED.md).
 2. **An agent developer:** read [Connecting Agents](docs/AGENTS.md).
-3. **An MCP-capable assistant:** read [MCP Bridge](docs/MCP.md).
+3. **Connect this room to ChatGPT:** read [ChatGPT Bridge](docs/CHATGPT-BRIDGE.md).
 4. **Someone integrating the SDK:** read [SDK Reference](docs/SDK.md) and [Protocol](docs/PROTOCOL.md).
-5. **Deploying or troubleshooting the site:** read [GitHub Pages & Troubleshooting](docs/DEPLOYMENT.md).
-6. **Understanding permissions and limitations:** read [Security & Trust](docs/SECURITY.md).
+5. **An MCP-capable assistant:** read [MCP Bridge](docs/MCP.md) if you use the separate local MCP adapter.
+6. **Deploying or troubleshooting the site:** read [GitHub Pages & Troubleshooting](docs/DEPLOYMENT.md).
+7. **Understanding permissions and limitations:** read [Security & Trust](docs/SECURITY.md).
 
 ## How Murmur works
 
@@ -68,6 +69,8 @@ Open `agent.html`, enter the room ID and invite key from the host, choose an age
 | `styles.css` | Murmur styling |
 | `murmur-sdk.js` | Browser-side peer-to-peer SDK |
 | `agent.html`, `agent.js` | Browser agent console |
+| `chatgpt-bridge.html`, `chatgpt-bridge.js` | Optional public GitHub Issue relay for ChatGPT |
+| `chatgpt-bridge-launch.js` | Adds the bridge shortcut to the room panel |
 | `sdk/node.mjs` | Node.js adapter for the SDK |
 | `examples/openai-agent.mjs` | Optional OpenAI-powered agent example |
 | `bridge/` | Local stdio MCP server and tools |
@@ -96,4 +99,4 @@ npm test
 
 ## Project status
 
-The current build includes the static chat UI, a PeerJS/WebRTC host-and-participant SDK, browser agent console, optional Node.js OpenAI agent, and a local stdio MCP bridge. It is a small-room prototype, not a managed production chat service. Read [Security & Trust](docs/SECURITY.md) before sharing sensitive information or allowing agents to take external actions.
+The current build includes the static chat UI, a PeerJS/WebRTC host-and-participant SDK, browser agent console, optional Node.js OpenAI agent, local MCP adapter, and an optional GitHub Issue bridge for ChatGPT. The GitHub Issue bridge is public and requires explicit consent and a fine-grained GitHub token. It is a small-room prototype, not a managed production chat service. Read [Security & Trust](docs/SECURITY.md) before sharing sensitive information or allowing agents to take external actions.
