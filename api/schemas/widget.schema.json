@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itsmeh1.github.io/Murmur/api/schemas/widget.schema.json",
+  "title": "Murmur widget",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "data"
+      ],
+      "properties": {
+        "type": {
+          "const": "approval"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "title"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "details": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "action": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "data"
+      ],
+      "properties": {
+        "type": {
+          "const": "plan"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "title",
+            "steps"
+          ],
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "steps": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "maxLength": 240
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "data"
+      ],
+      "properties": {
+        "type": {
+          "const": "orchestrate"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "task"
+          ],
+          "properties": {
+            "task": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "followers": {
+              "type": "array",
+              "maxItems": 10,
+              "items": {
+                "type": "string",
+                "maxLength": 24
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "data"
+      ],
+      "properties": {
+        "type": {
+          "const": "choice"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "question",
+            "options"
+          ],
+          "properties": {
+            "question": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "options": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 8,
+              "items": {
+                "type": "string",
+                "maxLength": 120
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "data"
+      ],
+      "properties": {
+        "type": {
+          "const": "progress"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "label",
+            "percent"
+          ],
+          "properties": {
+            "label": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "percent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            }
+          }
+        }
+      }
+    }
+  ]
+}
