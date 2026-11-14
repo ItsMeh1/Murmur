@@ -5,12 +5,21 @@ on:
     branches: [main]
     paths:
       - "worker/**"
+      - "api/**"
+      - "docs/**"
+      - "sdk/**"
+      - "bridge/**"
+      - "examples/**"
+      - "tests/**"
+      - "script.js"
+      - "agent.js"
+      - "index.html"
+      - "agent.html"
+      - "murmur-*.js"
       - "wrangler.toml"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/deploy-api.yml"
-      - "sdk/**"
-      - "tests/**"
   workflow_dispatch:
 
 permissions:
@@ -18,7 +27,7 @@ permissions:
 
 jobs:
   verify:
-    name: Verify protocol and clients
+    name: Verify protocol, clients, and API build
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -31,6 +40,10 @@ jobs:
         run: npm install
       - name: Check JavaScript syntax
         run: npm run check
+      - name: Check Python example syntax
+        run: python -m py_compile examples/python_agent.py
+      - name: Compile Cloudflare Worker (dry run)
+        run: npx wrangler deploy --dry-run
       - name: Run protocol tests
         run: npm test
 
