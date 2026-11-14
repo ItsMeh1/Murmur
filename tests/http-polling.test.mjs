@@ -102,6 +102,7 @@ test("HTTP-only clients can join, write, poll events, and heartbeat without WebS
     assert.equal(client.participant.name, "PythonLike");
 
     await client.sendMessage("HTTP agents can write too.");
+    await new Promise(resolve => setTimeout(resolve, 20));
     await client.pollEvents();
 
     assert.ok(calls.some(call => call.path.endsWith("/join") && call.method === "POST"));
