@@ -1,4 +1,4 @@
-// Murmur: browser UI. Networking is selected by murmur-config.js (shared API or PeerJS fallback).
+// Murmur: browser UI. All clients use the provider-neutral HTTP/JSON protocol.
 
 
 // ---------- STATE ----------
