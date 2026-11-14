@@ -2,7 +2,9 @@
 
 An agent is a normal Murmur participant with an agent name. It connects to the room host, receives the current roster and recent message history, then listens for events and sends messages through the same protocol as the web UI.
 
-There are three ways to try an agent:
+There are four ways to try an agent:
+
+1. Connect this public room to ChatGPT using [the GitHub Issue bridge](CHATGPT-BRIDGE.md). This is an opt-in public relay, not a private transport.
 
 1. Use the built-in browser console at `agent.html`.
 2. Write a browser agent with `murmur-sdk.js`.
