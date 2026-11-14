@@ -127,96 +127,6 @@ export default {
           protocol: "murmur.v1",
           transports: ["http-json", "websocket"]
         });
-      } else if (url.pathname === "/v1/openapi.json" && request.method === "GET") {
-        response = json({
-          openapi: "3.1.0",
-          info: {
-            title: "Murmur API",
-            version: "1.0.0",
-            description: "Provider-neutral JSON API for rooms, humans, agents, messages and realtime events."
-          },
-          servers: [{ url: url.origin }],
-          paths: {
-            "/v1/health": { get: { operationId: "health", responses: { "200": { description: "API health" } } } },
-            "/v1/rooms": {
-              post: {
-                operationId: "createRoom",
-                requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { name: { type: "string", maxLength: 24 } } } } } },
-                responses: { "201": { description: "Room created" } }
-              }
-            },
-            "/v1/rooms/{roomId}/join": {
-              post: {
-                operationId: "joinRoom",
-                parameters: [{ name: "roomId", in: "path", required: true, schema: { type: "string" } }],
-                requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["inviteCode", "name"], properties: { inviteCode: { type: "string" }, name: { type: "string" }, kind: { type: "string", enum: ["human", "agent"] } } } } } },
-                responses: { "200": { description: "Joined room" } }
-              }
-            },
-            "/v1/rooms/{roomId}": {
-              get: {
-                operationId: "getRoom",
-                security: [{ bearerAuth: [] }],
-                parameters: [{ name: "roomId", in: "path", required: true, schema: { type: "string" } }],
-                responses: { "200": { description: "Room metadata" } }
-              },
-              delete: {
-                operationId: "closeRoom",
-                security: [{ bearerAuth: [] }],
-                parameters: [{ name: "roomId", in: "path", required: true, schema: { type: "string" } }],
-                responses: { "200": { description: "Room closed" } }
-              }
-            },
-            "/v1/rooms/{roomId}/members": {
-              get: {
-                operationId: "getMembers",
-                security: [{ bearerAuth: [] }],
-                parameters: [{ name: "roomId", in: "path", required: true, schema: { type: "string" } }],
-                responses: { "200": { description: "Room members" } }
-              }
-            },
-            "/v1/rooms/{roomId}/messages": {
-              get: {
-                operationId: "getMessages",
-                security: [{ bearerAuth: [] }],
-                parameters: [
-                  { name: "roomId", in: "path", required: true, schema: { type: "string" } },
-                  { name: "after", in: "query", schema: { type: "integer", minimum: 0 } },
-                  { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 200 } },
-                  { name: "channel", in: "query", schema: { type: "string", enum: ["general", "ideas", "pending", "orchestrate"] } }
-                ],
-                responses: { "200": { description: "Messages and next cursor" } }
-              },
-              post: {
-                operationId: "sendMessage",
-                security: [{ bearerAuth: [] }],
-                parameters: [{ name: "roomId", in: "path", required: true, schema: { type: "string" } }],
-                requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["text"], properties: { text: { type: "string", maxLength: 4000 }, channel: { type: "string", enum: ["general", "ideas", "pending", "orchestrate"] }, target: { type: "string", maxLength: 24 } } } } } },
-                responses: { "201": { description: "Message accepted" } }
-              }
-            },
-            "/v1/rooms/{roomId}/widgets": {
-              post: {
-                operationId: "createWidget",
-                security: [{ bearerAuth: [] }],
-                parameters: [{ name: "roomId", in: "path", required: true, schema: { type: "string" } }],
-                requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["widgetType", "data"], properties: { widgetType: { type: "string", enum: ["approval", "plan", "orchestrate", "choice", "progress"] }, data: { type: "object" }, channel: { type: "string" } } } } } },
-                responses: { "201": { description: "Widget accepted" } }
-              }
-            },
-            "/v1/rooms/{roomId}/connect-ticket": {
-              post: {
-                operationId: "createConnectionTicket",
-                security: [{ bearerAuth: [] }],
-                parameters: [{ name: "roomId", in: "path", required: true, schema: { type: "string" } }],
-                responses: { "200": { description: "Short-lived single-use WebSocket ticket" } }
-              }
-            }
-          },
-          components: {
-            securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } }
-          }
-        });
       } else if (url.pathname === "/v1/rooms" && request.method === "POST") {
         const body = await readJson(request);
         if (!isObject(body)) {
@@ -410,10 +320,6 @@ export class MurmurRoom extends DurableObject {
     if (await sha256(String(body.inviteCode || "")) !== state.inviteHash) {
       return fail("Invite code is incorrect.", 403, "invalid_invite");
     }
-    if (state.members.length >= MAX_MEMBERS) return fail("This room is full.", 409, "room_full");
-    if (state.members.some(member => member.name.toLowerCase() === name.toLowerCase())) {
-      return fail("That name is already in use.", 409, "name_taken");
-    }
 
     const accessToken = randomHex(32);
     const member = {
@@ -425,10 +331,20 @@ export class MurmurRoom extends DurableObject {
     };
     const tokenHash = await sha256(accessToken);
 
-    await this._mutate(next => {
-      next.members.push(member);
-      next.credentials[tokenHash] = member;
-    });
+    try {
+      await this._mutate(next => {
+        if (next.members.length >= MAX_MEMBERS) throw new Error("This room is full.");
+        if (next.members.some(item => item.name.toLowerCase() === name.toLowerCase())) {
+          throw new Error("That name is already in use.");
+        }
+        next.members.push(member);
+        next.credentials[tokenHash] = member;
+        next.presence ||= {};
+      });
+    } catch (error) {
+      const message = error.message || "Could not join room.";
+      return fail(message, message.includes("full") ? 409 : 409, message.includes("full") ? "room_full" : "name_taken");
+    }
 
     await this._recordEvent("member.joined", { member: { ...member, online: false } });
     await this._systemMessage(name + " joined the room.");
