@@ -22,6 +22,9 @@
       this.isHost = false;
       this._closing = false;
       this._reconnectTimer = null;
+      this._pollTimer = null;
+      this._polling = false;
+      this._cursor = 0;
     }
 
     on(name, callback) {
@@ -96,7 +99,12 @@
     }
 
     async _openSocket() {
-      if (typeof root.WebSocket !== "function") throw new Error("This runtime does not support WebSocket.");
+      if (typeof root.WebSocket !== "function") {
+        this.connected = true;
+        this.emit("transportFallback", { transport: "http-polling" });
+        this._startPolling();
+        return this;
+      }
       const ticket = await this._request("/v1/rooms/" + encodeURIComponent(this.room) + "/connect-ticket", { method: "POST", body: {} });
       return new Promise((resolve, reject) => {
         const socket = new root.WebSocket(this._socketUrl(), ["murmur.v1", "ticket." + ticket.ticket]);
@@ -119,6 +127,7 @@
             this.participant = payload.participant;
             this.members = payload.members || [];
             this.history = payload.history || [];
+            this._cursor = Number(payload.cursor) || 0;
             this._emitEvent(payload);
             if (!settled) {
               settled = true;
@@ -150,6 +159,37 @@
           if (!this._closing && this.accessToken) this._scheduleReconnect();
         });
       });
+    }
+
+    _startPolling() {
+      if (this._pollTimer || this._closing) return;
+      const poll = async () => {
+        if (this._polling || !this.connected || this._closing) return;
+        this._polling = true;
+        try {
+          const result = await this.getEvents({ after: this._cursor, limit: 200 });
+          for (const event of result.events || []) {
+            this._cursor = Math.max(this._cursor, Number(event.cursor) || 0);
+            this._receive(event);
+          }
+          const roster = await this.getMembers();
+          this._receive({ type: "presence.changed", members: roster.members || [] });
+        } catch (error) {
+          this.emit("serverError", { error: error.message });
+        } finally {
+          this._polling = false;
+        }
+      };
+      poll();
+      this._pollTimer = setInterval(poll, 2500);
+    }
+
+    async getEvents({ after = 0, limit = 100 } = {}) {
+      const params = new URLSearchParams({
+        after: String(Math.max(0, Number(after) || 0)),
+        limit: String(Math.max(1, Math.min(200, Number(limit) || 100)))
+      });
+      return this._request("/v1/rooms/" + encodeURIComponent(this.room) + "/events?" + params);
     }
 
     _scheduleReconnect() {
@@ -216,6 +256,7 @@
       } else if (event.type === "member.left") {
         this.members = this.members.filter(item => item.id !== event.member?.id);
       }
+      this._cursor = Math.max(this._cursor, Number(event.cursor) || Number(event.message?.cursor) || 0);
       this._emitEvent(event);
     }
 
@@ -244,7 +285,13 @@
       const params = new URLSearchParams({ limit: String(Math.max(1, Math.min(200, limit))), after: String(after) });
       if (channel) params.set("channel", channel);
       const result = await this._request("/v1/rooms/" + encodeURIComponent(this.room) + "/messages?" + params);
-      this.history = result.messages || this.history;
+      if (after === 0) this.history = result.messages || [];
+      else {
+        for (const message of result.messages || []) {
+          if (!this.history.some(item => item.id === message.id)) this.history.push(message);
+        }
+      }
+      this._cursor = Math.max(this._cursor, Number(result.cursor) || 0);
       return result;
     }
 
@@ -256,6 +303,19 @@
 
     async getRoom() {
       return this._request("/v1/rooms/" + encodeURIComponent(this.room));
+    }
+
+    async endRoom() {
+      if (!this.isHost) throw new Error("Only the room owner can close this room.");
+      const result = await this._request("/v1/rooms/" + encodeURIComponent(this.room), { method: "DELETE" });
+      this.close();
+      return result;
+    }
+
+    async leave() {
+      const result = await this._request("/v1/rooms/" + encodeURIComponent(this.room) + "/leave", { method: "POST", body: {} });
+      this.close();
+      return result;
     }
 
     async createInvite() {
@@ -282,6 +342,8 @@
       this._closing = true;
       if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
+      if (this._pollTimer) clearInterval(this._pollTimer);
+      this._pollTimer = null;
       try { this.socket?.close(1000, "Client closed"); } catch {}
       this.socket = null;
       this.connected = false;
@@ -291,8 +353,11 @@
   }
 
   root.MurmurAPIClient = MurmurAPIClient;
-  root.createMurmurClient = function () {
-    const apiBase = root.MURMUR_CONFIG?.apiBase;
-    return apiBase ? new MurmurAPIClient({ apiBase }) : new root.MurmurClient();
+  root.createMurmurClient = function (options = {}) {
+    const apiBase = options.apiBase || root.MURMUR_CONFIG?.apiBase;
+    if (!apiBase) {
+      throw new Error("The Murmur API is not configured yet. Deploy the API and set apiBase in murmur-config.js. See docs/DEPLOYMENT.md.");
+    }
+    return new MurmurAPIClient({ ...options, apiBase });
   };
 })(typeof globalThis !== "undefined" ? globalThis : window);
