@@ -1,7 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://itsmeh1.github.io/Murmur/api/schemas/event.schema.json",
-  "title": "Murmur event",
+  "title": "Murmur persisted room event",
+  "description": "Events returned by GET /v1/rooms/{roomId}/events. Every persisted event has a monotonically increasing cursor.",
   "oneOf": [
     {
       "type": "object",
@@ -66,33 +67,8 @@
         "type",
         "member",
         "cursor"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "type": {
-          "enum": [
-            "members.updated",
-            "presence.changed"
-          ]
-        },
-        "members": {
-          "type": "array",
-          "items": {
-            "type": "object"
-          }
-        },
-        "cursor": {
-          "type": "integer",
-          "minimum": 1
-        }
-      },
-      "required": [
-        "type",
-        "members",
-        "cursor"
-      ]
+      ],
+      "additionalProperties": false
     },
     {
       "type": "object",
@@ -116,7 +92,8 @@
         "id",
         "result",
         "cursor"
-      ]
+      ],
+      "additionalProperties": false
     },
     {
       "type": "object",
@@ -128,7 +105,9 @@
           "type": "string"
         },
         "percent": {
-          "type": "number"
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
         },
         "cursor": {
           "type": "integer",
@@ -140,27 +119,8 @@
         "id",
         "percent",
         "cursor"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "type": {
-          "const": "error"
-        },
-        "error": {
-          "type": "string"
-        },
-        "cursor": {
-          "type": "integer",
-          "minimum": 1
-        }
-      },
-      "required": [
-        "type",
-        "error",
-        "cursor"
-      ]
+      ],
+      "additionalProperties": false
     }
   ]
 }
