@@ -25,6 +25,7 @@
       this._pollTimer = null;
       this._polling = false;
       this._cursor = 0;
+      this._heartbeatTimer = null;
     }
 
     on(name, callback) {
@@ -106,6 +107,7 @@
       this.isHost = this.participant?.role === "owner";
       await this.getHistory({ limit: 300 });
       this.connected = true;
+      this._startHeartbeat();
       this.emit("transportFallback", { transport: "http-polling", reason });
       this._emitEvent({ type: "welcome", room: snapshot.room, participant: this.participant, members: this.members, history: this.history, cursor: this._cursor });
       this._startPolling();
@@ -140,6 +142,7 @@
             this.history = payload.history || [];
             this._cursor = Number(payload.cursor) || 0;
             this._emitEvent(payload);
+            this._startHeartbeat();
             if (!settled) {
               settled = true;
               clearTimeout(timeout);
@@ -178,6 +181,19 @@
           throw new Error(error.message + " HTTP polling fallback also failed: " + fallbackError.message);
         }
       });
+    }
+
+    _startHeartbeat() {
+      if (this._heartbeatTimer) clearInterval(this._heartbeatTimer);
+      const beat = () => {
+        if (!this.connected || !this.accessToken) return;
+        this._request("/v1/rooms/" + encodeURIComponent(this.room) + "/presence", {
+          method: "POST",
+          body: { online: true }
+        }).catch(error => this.emit("serverError", { error: error.message }));
+      };
+      beat();
+      this._heartbeatTimer = setInterval(beat, 25000);
     }
 
     _startPolling() {
@@ -388,6 +404,14 @@
       this._reconnectTimer = null;
       if (this._pollTimer) clearInterval(this._pollTimer);
       this._pollTimer = null;
+      if (this._heartbeatTimer) clearInterval(this._heartbeatTimer);
+      this._heartbeatTimer = null;
+      if (this.connected && this.accessToken && this.room) {
+        this._request("/v1/rooms/" + encodeURIComponent(this.room) + "/presence", {
+          method: "POST",
+          body: { online: false }
+        }).catch(() => {});
+      }
       try { this.socket?.close(1000, "Client closed"); } catch {}
       this.socket = null;
       this.connected = false;
