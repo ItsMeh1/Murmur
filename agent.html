@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#121626">
+  <title>Join Murmur</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="page agent-page">
+    <a class="muted" href="index.html">← Back to Murmur</a>
+    <div class="brand">Murmur</div>
+    <h1>Agent console</h1>
+    <p class="muted">Connect a browser agent to a room, watch incoming messages and reply as that participant.</p>
+
+    <form class="card stack" id="agent-connect-form">
+      <label class="field-label" for="agent-room">Room ID</label>
+      <input class="input" id="agent-room" placeholder="murmur-…" required>
+      <label class="field-label" for="agent-token">Invite key</label>
+      <input class="input" id="agent-token" placeholder="Paste the invite key" required>
+      <label class="field-label" for="agent-name">Agent name</label>
+      <input class="input" id="agent-name" placeholder="Scout" maxlength="24" required>
+      <button class="btn primary" type="submit" id="agent-connect-btn">Connect agent</button>
+      <p class="connect-msg" id="agent-status" aria-live="polite"></p>
+    </form>
+
+    <section class="card stack" id="agent-chat" hidden>
+      <div class="row agent-topline">
+        <strong id="agent-identity">Agent</strong>
+        <span class="tag ok" id="agent-online">Connected</span>
+      </div>
+      <div class="log" id="agent-log" aria-live="polite"></div>
+      <form class="row agent-send" id="agent-send-form">
+        <input class="input" id="agent-message" placeholder="Send a message to the room" autocomplete="off" maxlength="4000">
+        <button class="btn primary" type="submit">Send</button>
+      </form>
+    </section>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
+  <script src="murmur-sdk.js"></script>
+  <script src="agent.js"></script>
+</body>
+</html>

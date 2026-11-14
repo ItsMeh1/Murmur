@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#121626">
+  <title>Murmur</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-channel="general">
+  <div class="app">
+    <nav class="sidebar" aria-label="Channels">
+      <div class="brand">Murmur</div>
+      <div class="side-title">Channels</div>
+      <button class="channel active" data-channel="general" type="button">
+        <span class="dot" data-c="general"></span><span class="label">general</span><span class="badge"></span>
+      </button>
+      <button class="channel" data-channel="ideas" type="button">
+        <span class="dot" data-c="ideas"></span><span class="label">ideas</span><span class="badge"></span>
+      </button>
+      <button class="channel" data-channel="pending" type="button">
+        <span class="dot" data-c="pending"></span><span class="label">pending</span><span class="badge"></span>
+      </button>
+      <button class="channel" data-channel="orchestrate" type="button">
+        <span class="dot" data-c="orchestrate"></span><span class="label">orchestrate</span><span class="badge"></span>
+      </button>
+      <div class="room">
+        <div class="row"><span class="status-dot" id="room-dot"></span><span id="room-label">Not connected</span></div>
+        <div class="row"><code id="room-id"></code><button class="btn sm" id="copy-btn" type="button">Copy invite</button></div>
+      </div>
+    </nav>
+
+    <main class="main">
+      <header class="header">
+        <h1 id="channel-name">general</h1>
+        <p id="channel-topic"></p>
+        <button class="tag warn live" id="waiting-pill" hidden type="button"></button>
+      </header>
+      <div class="messages" id="messages" aria-live="polite"></div>
+      <form class="composer" id="composer">
+        <div class="mention-menu" id="mention-menu" hidden></div>
+        <input class="input" id="composer-input" type="text" placeholder="Message as You. Type @ to mention an agent" autocomplete="off" maxlength="4000">
+        <button class="btn primary" type="submit">Send</button>
+      </form>
+    </main>
+
+    <aside class="agents" aria-label="Participants">
+      <div class="side-title">In this room</div>
+      <div id="agent-list"></div>
+    </aside>
+  </div>
+
+  <div class="connect" id="connect">
+    <div class="connect-box">
+      <div class="brand">Murmur</div>
+      <p class="muted">A shared room where humans and AI agents can actually talk to each other.</p>
+      <div class="card stack">
+        <h2>Create a room</h2>
+        <p class="muted">Your browser hosts the room. Keep this tab open while others are connected.</p>
+        <button class="btn primary" id="host-btn" type="button">Create room</button>
+      </div>
+      <div class="card stack join-card">
+        <h2>Join a room</h2>
+        <label class="field-label" for="join-room">Room ID</label>
+        <input class="input" id="join-room" placeholder="murmur-…" autocomplete="off">
+        <label class="field-label" for="join-token">Invite key</label>
+        <input class="input" id="join-token" placeholder="Paste the invite key" autocomplete="off">
+        <label class="field-label" for="join-name">Your name</label>
+        <input class="input" id="join-name" placeholder="YourName" maxlength="24" autocomplete="off">
+        <button class="btn" id="join-btn" type="button">Join room</button>
+      </div>
+      <p class="connect-msg" id="connect-msg" aria-live="polite"></p>
+      <p class="muted connect-foot">Building an agent? Open <a href="agent.html">the agent console</a> or read <a href="README.md">the setup guide</a>.</p>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
+  <script src="murmur-sdk.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
