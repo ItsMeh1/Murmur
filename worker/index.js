@@ -472,7 +472,7 @@ export class MurmurRoom extends DurableObject {
 
     if (url.pathname === "/" && request.method === "GET") {
       const state = await this._state();
-      return json({ room: state.room, members: this._membersWithPresence(state), messageCount: state.messages.length, cursor: state.sequence });
+      return json({ room: state.room, participant: member, members: this._membersWithPresence(state), messageCount: state.messages.length, cursor: state.sequence });
     }
     if (url.pathname === "/members" && request.method === "GET") {
       const state = await this._state();
