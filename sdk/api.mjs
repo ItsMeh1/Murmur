@@ -23,6 +23,9 @@ export class MurmurClient extends EventEmitter {
     this._closing = false;
     this._pollTimer = null;
     this._polling = false;
+    this._heartbeatTimer = null;
+    this._pollTimer = null;
+    this._polling = false;
   }
 
   async request(path, { method = "GET", body } = {}) {
@@ -53,67 +56,80 @@ export class MurmurClient extends EventEmitter {
     const url = new URL(this.apiBase + "/v1/rooms/" + encodeURIComponent(this.room) + "/connect");
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
 
-    return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url, ["murmur.v1", "ticket." + ticket.ticket]);
-      this.socket = socket;
-      let settled = false;
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        socket.close();
-        reject(new Error("Timed out connecting to Murmur."));
-      }, 20000);
+    try {
+      return await new Promise((resolve, reject) => {
+        const socket = new WebSocket(url, ["murmur.v1", "ticket." + ticket.ticket]);
+        this.socket = socket;
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          socket.close();
+          reject(new Error("Timed out connecting to Murmur."));
+        }, 20000);
 
-      socket.addEventListener("message", event => {
-        let payload;
-        try {
-          payload = JSON.parse(String(event.data));
-        } catch {
-          this.emit("clientError", new Error("Murmur sent invalid JSON."));
-          return;
-        }
-        if (payload.type === "welcome") {
-          this.connected = true;
-          this.participant = payload.participant;
-          this.members = payload.members || [];
-          this.history = payload.history || [];
-          this.cursor = Number(payload.cursor) || 0;
-          this.emit("event", payload);
+        socket.addEventListener("message", event => {
+          let payload;
+          try {
+            payload = JSON.parse(String(event.data));
+          } catch {
+            this.emit("clientError", new Error("Murmur sent invalid JSON."));
+            return;
+          }
+          if (payload.type === "welcome") {
+            this.connected = true;
+            this.participant = payload.participant;
+            this.members = payload.members || [];
+            this.history = payload.history || [];
+            this.cursor = Number(payload.cursor) || 0;
+            this.emit("event", payload);
+            this.startHeartbeat();
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              resolve(this);
+            }
+            return;
+          }
+          this.receive(payload);
+        });
+
+        socket.addEventListener("error", () => {
           if (!settled) {
             settled = true;
             clearTimeout(timer);
-            resolve(this);
+            reject(new Error("Murmur WebSocket connection failed."));
           }
-          return;
-        }
-        this.receive(payload);
-      });
+        });
 
-      socket.addEventListener("error", () => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          reject(new Error("Murmur WebSocket connection failed."));
-        }
+        socket.addEventListener("close", event => {
+          const wasConnected = this.connected;
+          this.connected = false;
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            reject(new Error("Socket closed before welcome (" + event.code + ")."));
+          }
+          if (wasConnected) this.emit("disconnected", { code: event.code });
+        });
       });
+    } catch (error) {
+      // HTTP remains a complete transport when WebSocket is blocked.
+      return this.startPolling(error.message || "WebSocket connection failed.");
+    }
+  }
 
-      socket.addEventListener("close", event => {
-        const wasConnected = this.connected;
-        this.connected = false;
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          reject(new Error("Socket closed before welcome (" + event.code + ")."));
-        }
-        if (wasConnected) this.emit("disconnected", { code: event.code });
-      });
-    }).catch(async error => {
-      try {
-        return await this.startPolling(error.message || "WebSocket connection failed.");
-      } catch (fallbackError) {
-        throw new Error(error.message + " HTTP polling fallback also failed: " + fallbackError.message);
-      }
-    });
+  startHeartbeat() {
+    if (this._heartbeatTimer) clearInterval(this._heartbeatTimer);
+    const beat = () => {
+      if (!this.connected || !this.accessToken || !this.room) return;
+      this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/presence", {
+        method: "POST",
+        body: { online: true }
+      }).catch(error => this.emit("clientError", error));
+    };
+    beat();
+    this._heartbeatTimer = setInterval(beat, 25000);
   }
 
   async startPolling(reason = "WebSocket unavailable") {
@@ -124,8 +140,15 @@ export class MurmurClient extends EventEmitter {
     await this.getHistory({ limit: 300 });
     this.connected = true;
     this._closing = false;
+    this.startHeartbeat();
     this.emit("transportFallback", { transport: "http-polling", reason });
-    this.emit("event", { type: "welcome", participant: this.participant, members: this.members, history: this.history, cursor: this.cursor });
+    this.emit("event", {
+      type: "welcome",
+      participant: this.participant,
+      members: this.members,
+      history: this.history,
+      cursor: this.cursor
+    });
     this.pollEvents();
     this._pollTimer = setInterval(() => this.pollEvents(), 2500);
     return this;
@@ -237,7 +260,7 @@ export class MurmurClient extends EventEmitter {
 
   submit(event) {
     if (!this.connected) throw new Error("Not connected to Murmur.");
-    if (this.socket?.readyState === WebSocket.OPEN) {
+    if (this.socket && this.socket.readyState === 1) {
       this.socket.send(JSON.stringify(event));
       return Promise.resolve({ sent: true });
     }
@@ -260,8 +283,13 @@ export class MurmurClient extends EventEmitter {
       throw new Error("Unsupported HTTP event: " + event.type);
     }
 
-    return this.request("/v1/rooms/" + encodeURIComponent(this.room) + path, { method: "POST", body })
-      .catch(error => { this.emit("clientError", error); throw error; });
+    return this.request("/v1/rooms/" + encodeURIComponent(this.room) + path, {
+      method: "POST",
+      body
+    }).catch(error => {
+      this.emit("clientError", error);
+      throw error;
+    });
   }
 
   sendMessage(text, options = {}) {
@@ -275,7 +303,13 @@ export class MurmurClient extends EventEmitter {
 
   createWidget(widgetType, data, options = {}) {
     const id = "widget_" + randomUUID();
-    return this.submit({ type: "widget.create", id, widgetType, data, channel: options.channel }).then(() => id);
+    return this.submit({
+      type: "widget.create",
+      id,
+      widgetType,
+      data,
+      channel: options.channel
+    }).then(() => id);
   }
 
   respondToWidget(id, result) {
@@ -309,6 +343,14 @@ export class MurmurClient extends EventEmitter {
     const params = new URLSearchParams({
       after: String(Math.max(0, after)),
       limit: String(Math.max(1, Math.min(200, limit)))
+    });
+    return this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/events?" + params);
+  }
+
+  async getEvents({ after = 0, limit = 100 } = {}) {
+    const params = new URLSearchParams({
+      after: String(Math.max(0, Number(after) || 0)),
+      limit: String(Math.max(1, Math.min(200, Number(limit) || 100)))
     });
     return this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/events?" + params);
   }
