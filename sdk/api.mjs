@@ -21,6 +21,8 @@ export class MurmurClient extends EventEmitter {
     this.isHost = false;
     this.socket = null;
     this._closing = false;
+    this._pollTimer = null;
+    this._polling = false;
   }
 
   async request(path, { method = "GET", body } = {}) {
@@ -42,7 +44,7 @@ export class MurmurClient extends EventEmitter {
 
   async openSocket() {
     if (typeof globalThis.WebSocket !== "function") {
-      throw new Error("This Node runtime has no global WebSocket. Use the REST events endpoint for polling.");
+      return this.startPolling("WebSocket is unavailable in this runtime.");
     }
     const ticket = await this.request(
       "/v1/rooms/" + encodeURIComponent(this.room) + "/connect-ticket",
@@ -105,7 +107,46 @@ export class MurmurClient extends EventEmitter {
         }
         if (wasConnected) this.emit("disconnected", { code: event.code });
       });
+    }).catch(async error => {
+      try {
+        return await this.startPolling(error.message || "WebSocket connection failed.");
+      } catch (fallbackError) {
+        throw new Error(error.message + " HTTP polling fallback also failed: " + fallbackError.message);
+      }
     });
+  }
+
+  async startPolling(reason = "WebSocket unavailable") {
+    const snapshot = await this.getRoom();
+    this.participant = snapshot.participant;
+    this.members = snapshot.members || [];
+    this.isHost = this.participant?.role === "owner";
+    await this.getHistory({ limit: 300 });
+    this.connected = true;
+    this._closing = false;
+    this.emit("transportFallback", { transport: "http-polling", reason });
+    this.emit("event", { type: "welcome", participant: this.participant, members: this.members, history: this.history, cursor: this.cursor });
+    this.pollEvents();
+    this._pollTimer = setInterval(() => this.pollEvents(), 2500);
+    return this;
+  }
+
+  async pollEvents() {
+    if (!this.connected || this._closing || this._polling) return;
+    this._polling = true;
+    try {
+      const result = await this.getEvents({ after: this.cursor, limit: 200 });
+      for (const event of result.events || []) {
+        this.cursor = Math.max(this.cursor || 0, Number(event.cursor) || 0);
+        this.receive(event);
+      }
+      const roster = await this.getMembers();
+      this.receive({ type: "presence.changed", members: roster.members || [] });
+    } catch (error) {
+      this.emit("clientError", error);
+    } finally {
+      this._polling = false;
+    }
   }
 
   async createRoom({ name = "You" } = {}) {
@@ -195,14 +236,36 @@ export class MurmurClient extends EventEmitter {
   }
 
   submit(event) {
-    if (!this.connected || this.socket?.readyState !== WebSocket.OPEN) {
-      throw new Error("Not connected to Murmur.");
+    if (!this.connected) throw new Error("Not connected to Murmur.");
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify(event));
+      return Promise.resolve({ sent: true });
     }
-    this.socket.send(JSON.stringify(event));
+
+    let path;
+    let body;
+    if (event.type === "message.send") {
+      path = "/messages";
+      body = { text: event.text, channel: event.channel, target: event.target };
+    } else if (event.type === "widget.create") {
+      path = "/widgets";
+      body = { id: event.id, widgetType: event.widgetType, data: event.data, channel: event.channel };
+    } else if (event.type === "widget.respond") {
+      path = "/widgets/" + encodeURIComponent(event.id) + "/respond";
+      body = { result: event.result };
+    } else if (event.type === "progress.update") {
+      path = "/widgets/" + encodeURIComponent(event.id) + "/progress";
+      body = { percent: event.percent };
+    } else {
+      throw new Error("Unsupported HTTP event: " + event.type);
+    }
+
+    return this.request("/v1/rooms/" + encodeURIComponent(this.room) + path, { method: "POST", body })
+      .catch(error => { this.emit("clientError", error); throw error; });
   }
 
   sendMessage(text, options = {}) {
-    this.submit({
+    return this.submit({
       type: "message.send",
       text,
       channel: options.channel || "general",
@@ -212,16 +275,15 @@ export class MurmurClient extends EventEmitter {
 
   createWidget(widgetType, data, options = {}) {
     const id = "widget_" + randomUUID();
-    this.submit({ type: "widget.create", id, widgetType, data, channel: options.channel });
-    return id;
+    return this.submit({ type: "widget.create", id, widgetType, data, channel: options.channel }).then(() => id);
   }
 
   respondToWidget(id, result) {
-    this.submit({ type: "widget.respond", id, result });
+    return this.submit({ type: "widget.respond", id, result });
   }
 
   updateProgress(id, percent) {
-    this.submit({ type: "progress.update", id, percent });
+    return this.submit({ type: "progress.update", id, percent });
   }
 
   async getHistory({ channel, limit = 100, after = 0 } = {}) {
@@ -255,6 +317,14 @@ export class MurmurClient extends EventEmitter {
     const data = await this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/members");
     this.members = data.members || [];
     return data;
+  }
+
+  async getEvents({ after = 0, limit = 100 } = {}) {
+    const params = new URLSearchParams({
+      after: String(Math.max(0, Number(after) || 0)),
+      limit: String(Math.max(1, Math.min(200, Number(limit) || 100)))
+    });
+    return this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/events?" + params);
   }
 
   async getRoom() {
@@ -301,6 +371,8 @@ export class MurmurClient extends EventEmitter {
 
   close() {
     this._closing = true;
+    if (this._pollTimer) clearInterval(this._pollTimer);
+    this._pollTimer = null;
     try { this.socket?.close(1000, "Client closed"); } catch {}
     this.socket = null;
     this.connected = false;
