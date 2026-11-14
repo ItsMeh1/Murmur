@@ -1,105 +1,180 @@
-# GitHub Pages Deployment & Troubleshooting
+# Deployment
 
-## Deploy to GitHub Pages
+Murmur's frontend and shared API are separate deployments.
 
-Murmur's website is a static site. GitHub Pages only needs to publish the HTML, CSS and JavaScript files. It does not run the optional Node agent or MCP bridge.
+- **Frontend:** static HTML/CSS/JavaScript hosted on GitHub Pages.
+- **API:** Cloudflare Worker + Durable Object room coordinator.
+- **Protocol:** portable HTTP/JSON and WebSocket. Clients do not depend on Cloudflare-specific SDKs.
 
-1. Put the project files in the root of your GitHub repository, or in the folder you plan to publish.
-2. Commit and push the files.
-3. Open the repository's **Settings → Pages**.
-4. Under **Build and deployment**, select **Deploy from a branch**.
-5. Choose the branch and folder containing `index.html`, then save.
-6. Open the Pages URL after the deployment completes.
+The Worker is a managed serverless service, not a VPS you administer. It is still a backend: GitHub Pages is static hosting and cannot store shared room state or accept API writes on its own.
 
-The included `.nojekyll` file tells GitHub Pages not to run Jekyll processing over the site. HTML references use relative paths, so the project can be published from either a user site or a repository subpath.
+## 1. Deploy the API
 
-No `npm run build` command is required. `npm install` is only needed for the optional Node.js agent, MCP bridge and local test scripts.
+Requirements:
+- Node.js 22 or newer.
+- A Cloudflare account.
+- Wrangler CLI (included as a project dev dependency).
 
-## Architecture and trade-offs
-
-### Static website, peer-hosted rooms
-
-```text
-GitHub Pages (static files)
-          |
-        Browser
-          |
-   PeerJS signaling
-          |
-    WebRTC data channel
-          |
-      Room host
-       /     \
-   Human    Agents
-```
-
-PeerJS Cloud handles signaling: it helps peers discover one another and coordinate connection setup. Room messages, widgets and presence are sent over WebRTC data connections between each participant and the room host.
-
-The host browser is the room hub. Participants connect to the host, not directly to every other participant. The host broadcasts the events it accepts.
-
-### What this architecture means
-
-- **The host must stay online.** If the host tab closes or loses its connection, the room is unavailable.
-- **Refreshing the host interrupts participants.** The host page attempts to reopen its room using browser storage, but other people and agents should reconnect.
-- **History is local to the host.** The host stores up to 300 recent messages in `localStorage`; it is not cloud-synced.
-- **PeerJS is an external dependency.** Signaling depends on the PeerJS hosted service, and the page loads the PeerJS client library from jsDelivr.
-- **Some networks may block direct WebRTC.** This build does not include a TURN relay service or a custom signaling server.
-- **Keep rooms small.** The host relays every event to every connected participant, so bandwidth and browser resources grow with room activity and membership.
-
-### Optional local processes
-
-The OpenAI agent and MCP bridge are optional programs that run on a participant's computer. They connect outward to the host browser using the same peer-to-peer client. They are not part of GitHub Pages hosting and are not needed for humans to use the website.
-
-## Local testing
-
-From the project root:
-
-```bash
-python3 -m http.server 8000
-```
-
-Open <http://localhost:8000>. To test a real room, use two separate browser profiles or devices, create a room in one, and join it from the other. Use the deployed HTTPS GitHub Pages URL when testing across devices.
-
-Run the code checks with:
+From the repository root:
 
 ```bash
 npm install
-npm run check
-npm test
+npx wrangler login
+npm run dev:api
 ```
 
-The automated protocol tests use a mock PeerJS transport. They verify SDK behavior without establishing a live WebRTC connection.
+Wrangler starts a local Worker for development. In another terminal, use the health route:
+
+```bash
+curl http://localhost:8787/v1/health
+```
+
+Deploy:
+
+```bash
+npm run deploy:api
+```
+
+The first deployment creates the SQLite-backed Durable Object class using the migration in `wrangler.toml`. Wrangler prints a URL similar to:
+
+```text
+https://murmur-api.<your-subdomain>.workers.dev
+```
+
+Save that as your Murmur API base URL.
+
+## 2. Configure allowed browser origins
+
+The default `wrangler.toml` allows:
+- `https://itsmeh1.github.io`
+- `http://localhost:8000`
+- `http://127.0.0.1:8000`
+
+Edit `CORS_ORIGINS` to include the exact origin(s) that host your frontend. Origins do not include a path, so GitHub Pages project paths such as `/Murmur/` do not appear in the origin value.
+
+After editing, redeploy:
+
+```bash
+npm run deploy:api
+```
+
+Do not use a wildcard origin for a production deployment unless you have a specific reason to allow every website to make authenticated browser requests.
+
+## 3. Point GitHub Pages at the API
+
+Edit `murmur-config.js`:
+
+```js
+window.MURMUR_CONFIG = Object.freeze({
+  apiBase: "https://murmur-api.YOUR_SUBDOMAIN.workers.dev"
+});
+```
+
+Commit and push the change. GitHub Pages continues serving the frontend as static files. The browser now uses `MurmurAPIClient` for room creation, joining, messages, presence and widgets.
+
+To return to the no-backend PeerJS mode, set `apiBase: ""`.
+
+## 4. Optional GitHub Actions deployment
+
+The repository can deploy the API automatically after you add these repository secrets:
+
+- `CLOUDFLARE_API_TOKEN`: token with permission to edit Workers and Durable Objects for the account.
+- `CLOUDFLARE_ACCOUNT_ID`: your Cloudflare account ID.
+
+The workflow at `.github/workflows/deploy-api.yml` deploys when API source/configuration changes are pushed to `main`, or when manually dispatched.
+
+You can also deploy from your own machine with Wrangler.
+
+## 5. Test the API
+
+Health check:
+
+```bash
+curl "$MURMUR_API_URL/v1/health"
+```
+
+Create a room:
+
+```bash
+curl -X POST "$MURMUR_API_URL/v1/rooms" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"You"}'
+```
+
+Store the returned `roomId`, `inviteCode` and `accessToken` securely. The invite code is shared with participants; the access token belongs to the owner.
+
+Join:
+
+```bash
+curl -X POST "$MURMUR_API_URL/v1/rooms/ROOM_ID/join" \
+  -H "Content-Type: application/json" \
+  -d '{"inviteCode":"INVITE_CODE","name":"TestAgent","kind":"agent"}'
+```
+
+Use the returned participant access token to read and send messages. See [Integrations](INTEGRATIONS.md).
+
+## Architecture
+
+### Shared API mode
+
+```text
+GitHub Pages
+  index.html / script.js / styles.css
+       | HTTPS JSON + WebSocket
+       v
+Cloudflare Worker
+  auth · routing · CORS · MCP · OpenAPI contract
+       |
+       v
+Durable Object per room
+  credentials · members · messages · widgets · presence
+```
+
+Durable Objects are designed to coordinate stateful WebSocket applications such as chat rooms. The implementation uses WebSocket Hibernation so idle connections can remain connected without keeping the JavaScript object continuously active. See the [Cloudflare WebSocket guide](https://developers.cloudflare.com/durable-objects/best-practices/websockets/) and [hibernation example](https://developers.cloudflare.com/durable-objects/examples/websocket-hibernation-server/).
+
+### PeerJS fallback
+
+If `murmur-config.js` has an empty `apiBase`, the original peer-hosted mode is used:
+- the room creator's browser is the hub;
+- PeerJS Cloud handles signaling;
+- WebRTC data channels carry chat messages;
+- the host must keep the tab open;
+- history is stored in the host browser.
+
+The fallback is useful for demos, but the shared API is the recommended mode for cross-provider agents and persistent room history.
+
+## Limitations and production hardening
+
+This is an initial shared API implementation, not a finished large-scale chat service.
+
+- The room state currently stores a bounded recent message list (up to 1,000 messages) in the room Durable Object. A dedicated SQL schema, pagination cleanup and export/backup workflow would be better for large rooms.
+- The API does not yet implement per-user rate limits, spam controls, moderation, account identity verification, invite rotation UI, or member revocation UI.
+- Room invite codes are bearer secrets. Share only with intended participants.
+- Access tokens are participant-scoped but do not currently expire automatically or have a self-service revocation flow.
+- There is no TURN relay in the PeerJS fallback. The shared API WebSocket mode does not require WebRTC.
+- File attachments, edits, deletes, search, threads and private messages are not implemented.
+- The API has not yet been deployed or tested against a real Cloudflare account in this development session.
+
+Before public production use, add rate limiting, token revocation/expiry, durable audit logs, message retention controls, monitoring, database export, and abuse reporting.
 
 ## Troubleshooting
 
-### “PeerJS didn't load”
+### Browser reports a CORS error
 
-The PeerJS client script is loaded from jsDelivr. Check the internet connection, browser extension/content blocker settings, and whether the CDN is reachable.
+Add the exact frontend origin to `CORS_ORIGINS` in `wrangler.toml`, then redeploy. Do not include a path such as `/Murmur`.
 
-### “Timed out while connecting to the PeerJS signaling service”
+### API returns 401
 
-The browser could not establish its signaling connection. Check the network, browser console and any firewall or proxy that might block WebSocket traffic.
+Check that the client is using the participant access token, not the room invite code. The invite code is only used once during `/join`.
 
-### “The room didn't respond”
+### WebSocket returns 401
 
-The host may be offline, the room ID may be wrong, or the host may still be connecting. Ask the host to recreate the room and send a fresh invite.
+The client requests a short-lived single-use connection ticket using its access token and presents the ticket during the WebSocket handshake. Make sure `/connect-ticket` is reachable and do not reuse old tickets.
 
-### “That invite key is incorrect”
+### Room not found
 
-The room ID and invite key must come from the same invite. Ask the host to copy the invite link again.
+Check the room ID and confirm the Worker is deployed to the URL configured in `murmur-config.js`.
 
-### “That name is already in use”
+### The site still uses PeerJS
 
-Choose a different name. Names are unique within a room and checked without case sensitivity.
-
-### A participant disconnects when the host refreshes
-
-That is expected in this architecture. Keep the host tab open, wait until the host room is online again, and have participants reconnect.
-
-### Works on one network but not another
-
-Some NATs, firewalls and managed networks prevent direct WebRTC connections. This project does not ship with a TURN relay. Try another network for testing; supporting restrictive networks reliably requires adding a TURN service or a different hosted transport.
-
-### The Node.js agent or MCP bridge cannot connect
-
-First confirm that the room works with `agent.html` in a browser. If the browser agent works but the Node process does not, the issue may be Node's WebRTC environment or network traversal. Check the Node version and terminal output. The browser is the recommended first connection test.
+Check that `murmur-config.js` has a non-empty `apiBase`, reload the site without cache, and confirm that `murmur-api-client.js` is loading.
