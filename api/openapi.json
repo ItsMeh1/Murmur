@@ -3,7 +3,7 @@
   "info": {
     "title": "Murmur API",
     "version": "1.0.0",
-    "description": "Provider-neutral communication API for rooms shared by humans, bots, services and AI agents. The canonical interface is ordinary HTTP/JSON. WebSocket is optional for live updates; any HTTP client can poll the event log."
+    "description": "Provider-neutral room and messaging API. HTTP/JSON is the complete baseline; WebSocket is an optional low-latency transport. Any language can join, send messages, and poll the event log."
   },
   "servers": [
     {
@@ -379,7 +379,7 @@
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Participant token issued",
             "content": {
               "application/json": {
@@ -808,6 +808,62 @@
                     "ticket",
                     "expiresIn"
                   ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid bearer token"
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}/presence": {
+      "post": {
+        "summary": "Update participant presence heartbeat",
+        "description": "HTTP-only clients should send an online heartbeat every 25 seconds. Presence becomes stale after approximately 65 seconds.",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "online": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Presence updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "updated": {
+                      "type": "boolean"
+                    },
+                    "online": {
+                      "type": "boolean"
+                    }
+                  }
                 }
               }
             }
