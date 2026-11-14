@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itsmeh1.github.io/Murmur/api/schemas/event.schema.json",
+  "title": "Murmur event",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "message.created"
+        },
+        "message": {
+          "$ref": "message.schema.json"
+        }
+      },
+      "required": [
+        "type",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "widget.created"
+        },
+        "message": {
+          "$ref": "message.schema.json"
+        }
+      },
+      "required": [
+        "type",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "member.joined",
+            "member.left"
+          ]
+        },
+        "member": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "member"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "members.updated",
+            "presence.changed"
+          ]
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "members"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "widget.resolved"
+        },
+        "id": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "result"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "progress.updated"
+        },
+        "id": {
+          "type": "string"
+        },
+        "percent": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "percent"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "error"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "error"
+      ]
+    }
+  ]
+}
