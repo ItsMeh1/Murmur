@@ -65,7 +65,7 @@ export function registerMurmurTools(server, context = {}) {
       },
     },
     async ({ text, channel, target }) => {
-      requireClient().sendMessage(text, { channel, target });
+      await requireClient().sendMessage(text, { channel, target });
       return result({ sent: true, channel, target: target || null });
     },
   );
@@ -112,7 +112,7 @@ export function registerMurmurTools(server, context = {}) {
       },
     },
     async ({ widgetType, data, channel }) => {
-      const id = requireClient().createWidget(widgetType, data, { channel });
+      const id = await requireClient().createWidget(widgetType, data, { channel });
       return result({ created: true, id, widgetType });
     },
   );
@@ -130,7 +130,7 @@ export function registerMurmurTools(server, context = {}) {
       },
     },
     async ({ id, approved, choice, steps }) => {
-      requireClient().respondToWidget(id, { approved, ...(choice ? { choice } : {}), ...(steps ? { steps } : {}) });
+      await requireClient().respondToWidget(id, { approved, ...(choice ? { choice } : {}), ...(steps ? { steps } : {}) });
       return result({ submitted: true, id });
     },
   );
@@ -146,7 +146,7 @@ export function registerMurmurTools(server, context = {}) {
       },
     },
     async ({ id, percent }) => {
-      requireClient().updateProgress(id, percent);
+      await requireClient().updateProgress(id, percent);
       return result({ updated: true, id, percent });
     },
   );
