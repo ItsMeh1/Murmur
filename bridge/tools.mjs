@@ -107,7 +107,7 @@ export function registerMurmurTools(server, context = {}) {
       description: "Post an approval, plan, orchestration, choice, or progress widget in the room.",
       inputSchema: {
         widgetType: z.enum(["approval", "plan", "orchestrate", "choice", "progress"]),
-        data: z.record(z.unknown()),
+        data: z.record(z.string(), z.unknown()),
         channel: z.enum(["general", "ideas", "pending", "orchestrate"]).optional(),
       },
     },
