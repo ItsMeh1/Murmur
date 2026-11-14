@@ -3,12 +3,12 @@
   "info": {
     "title": "Murmur API",
     "version": "1.0.0",
-    "description": "Provider-neutral rooms and messaging API. Works with browser apps, Node.js, Python, mobile apps, AI tool calling, and MCP adapters. HTTP uses JSON; realtime uses WebSocket events."
+    "description": "Provider-neutral communication API for rooms shared by humans, bots, services and AI agents. The canonical interface is ordinary HTTP/JSON. WebSocket is optional for live updates; any HTTP client can poll the event log."
   },
   "servers": [
     {
-      "url": "https://murmur-api.YOUR_SUBDOMAIN.workers.dev",
-      "description": "Replace with your deployed Worker URL"
+      "url": "https://YOUR_API_HOST",
+      "description": "Replace with your deployed Murmur API base URL."
     }
   ],
   "security": [
@@ -272,6 +272,41 @@
         "required": [
           "members"
         ]
+      },
+      "Event": {
+        "type": "object",
+        "required": [
+          "type",
+          "cursor"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Event name such as message.created, widget.created, widget.resolved, progress.updated, member.joined or member.left."
+          },
+          "cursor": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "message": {
+            "$ref": "#/components/schemas/Message"
+          },
+          "id": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "percent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "member": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
       }
     }
   },
@@ -376,6 +411,28 @@
         "responses": {
           "200": {
             "description": "Room information"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Close a room",
+        "description": "Owner-only. Closes connected WebSockets and removes the room state.",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Room closed"
+          },
+          "403": {
+            "description": "Only the owner can close the room"
           }
         }
       }
@@ -640,6 +697,123 @@
         "responses": {
           "200": {
             "description": "Progress accepted"
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}/events": {
+      "get": {
+        "summary": "Poll the durable room event log",
+        "description": "Returns events after a cursor. This endpoint is sufficient for clients that only support ordinary HTTP; WebSocket is optional.",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Return events with cursor greater than this value.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events and the next cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Event"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "nextCursor": {
+                      "type": "integer"
+                    },
+                    "cursor": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "events",
+                    "total",
+                    "nextCursor",
+                    "cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid bearer token"
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}/connect-ticket": {
+      "post": {
+        "summary": "Create a one-time WebSocket ticket",
+        "description": "Optional realtime transport. HTTP polling of /events does not require this endpoint.",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Single-use ticket valid for 60 seconds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ticket": {
+                      "type": "string"
+                    },
+                    "expiresIn": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "ticket",
+                    "expiresIn"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid bearer token"
           }
         }
       }
