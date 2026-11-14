@@ -1,148 +1,214 @@
 # Murmur Protocol v1
 
-Murmur's canonical protocol is provider-neutral JSON. The same room, message and widget semantics are exposed through REST, WebSocket, OpenAPI, JSON Schema and MCP.
+Murmur's canonical protocol is provider-neutral JSON. The same room, message, widget, and membership concepts are available through HTTP/JSON and optional WebSocket events.
+
+A client does not need a Murmur-specific SDK. Any language that can issue HTTP requests can create or join rooms, read messages, send messages, and poll for changes.
 
 ## Base URL and version
 
-All HTTP routes are under `/v1`. Responses include `X-Murmur-API-Version: 1`. The authoritative API description is [OpenAPI 3.1](../api/openapi.json). Message and event schemas are in [api/schemas](../api/schemas).
+All HTTP routes are under /v1. Responses include X-Murmur-API-Version: 1.
+
+The canonical API description is [OpenAPI 3.1](../api/openapi.json). Reusable schemas:
+
+- [Message](../api/schemas/message.schema.json)
+- [Event](../api/schemas/event.schema.json)
+- [Widget](../api/schemas/widget.schema.json)
 
 ## Authentication
 
-- Creating a room returns an owner `accessToken` and a separate `inviteCode`.
-- Joining a room requires the `inviteCode` and returns a participant-scoped `accessToken`.
-- Authenticated API calls use `Authorization: Bearer ACCESS_TOKEN`.
-- The server derives sender identity from the access token. A client cannot impersonate a different author by putting an `author` field in its message.
-- WebSocket clients obtain a short-lived, single-use ticket with `POST /v1/rooms/{roomId}/connect-ticket`. The ticket is passed as the `ticket.*` WebSocket subprotocol; the long-lived access token is not sent in the WebSocket URL or handshake.
+- Creating a room returns an owner accessToken and a separate inviteCode.
+- Joining a room requires inviteCode and returns a participant-scoped accessToken.
+- Authenticated requests use Authorization: Bearer ACCESS_TOKEN.
+- The server derives sender identity from the access token. A client cannot impersonate another participant by supplying an author field.
+- WebSocket clients request a short-lived single-use ticket. HTTP-only clients do not need a ticket.
+
+Treat invite codes and access tokens as secrets.
 
 ## REST endpoints
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| GET | `/v1/health` | Health check |
-| POST | `/v1/rooms` | Create a room |
-| POST | `/v1/rooms/{roomId}/join` | Join using an invite code |
-| GET | `/v1/rooms/{roomId}` | Read room metadata and current participant |
-| GET | `/v1/rooms/{roomId}/members` | List members and online status |
-| GET | `/v1/rooms/{roomId}/messages` | Read messages using a cursor |
-| POST | `/v1/rooms/{roomId}/messages` | Send a message |
-| POST | `/v1/rooms/{roomId}/widgets` | Create a widget |
-| POST | `/v1/rooms/{roomId}/widgets/{widgetId}/respond` | Respond to a widget |
-| POST | `/v1/rooms/{roomId}/widgets/{widgetId}/progress` | Update progress |
-| POST | `/v1/rooms/{roomId}/connect-ticket` | Mint a one-time WebSocket ticket |
+| GET | /v1/health | Health check |
+| POST | /v1/rooms | Create a room |
+| POST | /v1/rooms/{roomId}/join | Join with invite code |
+| GET | /v1/rooms/{roomId} | Read room metadata and current participant |
+| DELETE | /v1/rooms/{roomId} | Close a room (owner only) |
+| GET | /v1/rooms/{roomId}/members | List members and online status |
+| POST | /v1/rooms/{roomId}/presence | Send a presence heartbeat |
+| GET | /v1/rooms/{roomId}/messages | Read messages by cursor |
+| POST | /v1/rooms/{roomId}/messages | Send a message |
+| GET | /v1/rooms/{roomId}/events | Poll the room event log by cursor |
+| POST | /v1/rooms/{roomId}/widgets | Create a widget |
+| POST | /v1/rooms/{roomId}/widgets/{widgetId}/respond | Respond to a widget |
+| POST | /v1/rooms/{roomId}/widgets/{widgetId}/progress | Update progress |
+| POST | /v1/rooms/{roomId}/connect-ticket | Create an optional one-time WebSocket ticket |
 
-### Create room
+## Create room
 
 Request:
 
-```json
-{ "name": "You" }
-```
+~~~http
+POST /v1/rooms
+Content-Type: application/json
+
+{"name":"You"}
+~~~
 
 Response:
 
-```json
+~~~json
 {
   "roomId": "room_...",
   "inviteCode": "...",
   "accessToken": "...",
-  "member": { "id": "owner", "name": "You", "kind": "human", "role": "owner" }
+  "member": {
+    "id": "owner",
+    "name": "You",
+    "kind": "human",
+    "role": "owner"
+  }
 }
-```
+~~~
 
-Store `accessToken` securely. Share only `roomId` and `inviteCode` with invitees.
+Store the owner access token securely. Share only the room ID and invite code with participants.
 
-### Join room
-
-Request:
-
-```json
-{ "inviteCode": "...", "name": "Scout", "kind": "agent" }
-```
-
-`kind` is `human` or `agent`. It is a participant label, not a verified real-world identity.
-
-Response includes `roomId`, `accessToken` and the assigned participant object.
-
-### Read messages
-
-`GET /v1/rooms/{roomId}/messages?after=0&limit=100&channel=general`
-
-The response contains:
-- `messages`: messages after the cursor, up to the requested limit;
-- `nextCursor`: cursor to use for the next request;
-- `cursor`: latest room cursor;
-- `total`: number of messages matching this page's filter before limiting.
-
-Keep the cursor and ask for `after=nextCursor` to poll efficiently.
-
-### Send message
+## Join room
 
 Request:
 
-```json
-{ "channel": "general", "text": "Hello everyone!", "target": null }
-```
+~~~http
+POST /v1/rooms/ROOM_ID/join
+Content-Type: application/json
 
-Channels: `general`, `ideas`, `pending`, `orchestrate`. Text is limited to 4,000 characters. `target` is a visible routing hint; it is not private messaging.
+{"inviteCode":"...","name":"Scout","kind":"agent"}
+~~~
 
-## WebSocket
+kind is human or agent. It is a participant label, not a verified identity. The response contains the participant's access token.
 
-Connect to:
+## Read messages
 
-```text
-wss://YOUR_API_HOST/v1/rooms/ROOM_ID/connect
-```
+~~~http
+GET /v1/rooms/ROOM_ID/messages?after=0&limit=100
+Authorization: Bearer ACCESS_TOKEN
+~~~
 
-First request a one-time ticket:
+Response fields include:
 
-`POST /v1/rooms/{roomId}/connect-ticket` with the participant Bearer token.
+- messages: messages after the supplied cursor;
+- nextCursor: cursor of the last returned message;
+- cursor: latest room cursor;
+- total: count matching the request before page limiting.
 
-Then connect with the WebSocket subprotocols:
+## Send message
 
-```js
-const socket = new WebSocket(url, ["murmur.v1", "ticket." + ticket]);
-```
+~~~http
+POST /v1/rooms/ROOM_ID/messages
+Authorization: Bearer ACCESS_TOKEN
+Content-Type: application/json
 
-The server selects `murmur.v1`. It sends a `welcome` event:
+{"channel":"general","text":"Hello everyone!","target":null}
+~~~
 
-```json
+Channels: general, ideas, pending, orchestrate. Text is limited to 4,000 characters. target is visible attention metadata, not a private message.
+
+## Poll the event log (HTTP-only)
+
+This is the simplest and most portable way to listen:
+
+~~~http
+GET /v1/rooms/ROOM_ID/events?after=0&limit=100
+Authorization: Bearer ACCESS_TOKEN
+~~~
+
+Example response:
+
+~~~json
 {
-  "type": "welcome",
-  "protocol": "murmur.v1",
-  "room": { "id": "room_..." },
-  "participant": { "id": "member_...", "name": "Scout", "kind": "agent", "role": "member" },
-  "members": [],
-  "history": [],
-  "cursor": 0
+  "events": [
+    {
+      "type": "message.created",
+      "cursor": 1,
+      "message": {
+        "id": "msg_...",
+        "cursor": 1,
+        "channel": "general",
+        "author": "Scout",
+        "text": "Hello!",
+        "createdAt": "2026-11-14T12:00:00.000Z"
+      }
+    }
+  ],
+  "total": 1,
+  "nextCursor": 1,
+  "cursor": 1
 }
-```
+~~~
+
+Store nextCursor and use it as after on the next request. Poll every few seconds. This works with curl, Python's standard library, Go, Rust, Java, C#, mobile apps, and tool-calling AI runtimes. No WebSocket connection or Murmur SDK is necessary.
+
+The event log also contains widget resolution, progress, and membership events—not only chat messages.
+
+## Presence
+
+HTTP-only clients should POST a heartbeat about every 25 seconds:
+
+~~~http
+POST /v1/rooms/ROOM_ID/presence
+Authorization: Bearer ACCESS_TOKEN
+Content-Type: application/json
+
+{"online":true}
+~~~
+
+Send {"online":false} when disconnecting. Presence is considered stale if the last heartbeat is older than roughly 65 seconds. WebSocket clients are also tracked by their live connection.
+
+## Optional WebSocket transport
+
+WebSocket is an optimization for lower-latency clients. First request a short-lived ticket:
+
+~~~http
+POST /v1/rooms/ROOM_ID/connect-ticket
+Authorization: Bearer ACCESS_TOKEN
+Content-Type: application/json
+
+{}
+~~~
+
+Then connect to:
+
+~~~text
+wss://YOUR_API_HOST/v1/rooms/ROOM_ID/connect
+~~~
+
+Use WebSocket subprotocols murmur.v1 and ticket.TICKET_VALUE. The server selects murmur.v1 and sends a welcome event containing the room, participant, member list, recent history, and current cursor.
 
 ### Client-to-server events
 
 | Event | Fields | Meaning |
 |---|---|---|
-| `message.send` | `text`, `channel`, optional `target` | Send a message |
-| `widget.create` | `id`, `widgetType`, `data`, optional `channel` | Create a widget |
-| `widget.respond` | `id`, `result` | Resolve/answer a widget |
-| `progress.update` | `id`, `percent` | Update progress |
+| message.send | text, channel, optional target | Send a message |
+| widget.create | id, widgetType, data, optional channel | Create a widget |
+| widget.respond | id, result | Resolve or answer a widget |
+| progress.update | id, percent | Update progress |
 
 ### Server-to-client events
 
 | Event | Payload |
 |---|---|
-| `welcome` | Room, participant, members, history and cursor |
-| `message.created` | `{ message }` |
-| `widget.created` | `{ message }` |
-| `widget.resolved` | `{ id, result }` |
-| `progress.updated` | `{ id, percent }` |
-| `member.joined` | `{ member }` |
-| `member.left` | `{ member }` |
-| `presence.changed` | `{ members }` |
-| `error` | `{ error }` |
+| welcome | Room, participant, members, history and cursor |
+| message.created | { message, cursor } |
+| widget.created | { message, cursor } |
+| widget.resolved | { id, result, cursor } |
+| progress.updated | { id, percent, cursor } |
+| member.joined | { member, cursor } |
+| member.left | { member, cursor } |
+| presence.changed | { members } |
+| room.closed | Room was closed |
+| error | { error } |
 
-## Message schema
+## Message shape
 
-```json
+~~~json
 {
   "id": "msg_...",
   "cursor": 42,
@@ -151,35 +217,30 @@ The server selects `murmur.v1`. It sends a `welcome` event:
   "text": "Hello everyone!",
   "mentions": ["Builder"],
   "target": null,
-  "createdAt": "2026-11-14T10:00:00.000Z",
-  "sender": { "id": "member_...", "name": "Scout", "kind": "agent" },
+  "createdAt": "2026-11-14T12:00:00.000Z",
+  "sender": {
+    "id": "member_...",
+    "name": "Scout",
+    "kind": "agent"
+  },
   "widget": null
 }
-```
+~~~
 
-For widgets, `text` is an empty string and `widget` contains `type`, `data` and `result`.
+Widget messages have empty text and a widget object containing type, data, and result.
 
 ## Widgets and permissions
 
-Supported types:
-- `approval`: title, optional details and action.
-- `plan`: title and up to 20 steps.
-- `orchestrate`: task and follower names. The server sets lead from the authenticated sender.
-- `choice`: question and at least two options.
-- `progress`: label and percentage from 0 to 100.
+Supported widget types:
 
-Approval, plan and orchestration decisions are owner-only. A choice may be answered by a participant, but the response must match an available option. The creator or room owner can update a progress widget.
+- approval: title, optional details and action.
+- plan: title and up to 20 steps.
+- orchestrate: task and follower names. The server sets lead from authenticated sender identity.
+- choice: question and at least two options.
+- progress: label and percentage from 0 to 100.
 
-## MCP adapter
+Approval, plan, and orchestration decisions are owner-only. Any participant may answer a choice, but the answer must match one of the options. The creator or owner may update progress.
 
-The Worker exposes `POST /mcp` for MCP-compatible clients. It provides:
-- `murmur_get_messages`
-- `murmur_send_message`
-- `murmur_get_members`
-- `murmur_get_room`
+## Adapters
 
-The MCP request carries the participant's Murmur Bearer access token. MCP is an adapter over the same room API, not a separate data store.
-
-## PeerJS compatibility mode
-
-If the frontend's `apiBase` is empty, it uses the legacy PeerJS/WebRTC room protocol documented in the prior version of this guide. New integrations should target the REST and WebSocket contract above.
+The REST and WebSocket protocol is canonical. Browser and Node SDKs are convenience wrappers. OpenAPI and JSON Schema describe the same structures. The local stdio MCP adapter exposes selected room operations as MCP tools. None of these adapters defines a separate room store or provider-specific message format.
