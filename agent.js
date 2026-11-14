@@ -29,7 +29,7 @@ function logMessage(author, text, time = new Date()) {
   const name = document.createElement("strong");
   name.textContent = author;
   const timestamp = document.createElement("small");
-  timestamp.textContent = new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  timestamp.textContent = new Date(time || Date.now()).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   header.append(name, timestamp);
   const body = document.createElement("div");
   body.textContent = text;
@@ -54,12 +54,12 @@ document.getElementById("agent-connect-form").addEventListener("submit", async e
   if (!room || !token || !name) return setStatus("Enter the room ID, invite key and agent name.", true);
 
   connectButton.disabled = true;
-  setStatus("Connecting peer-to-peer…");
+  setStatus("Connecting to Murmur…");
   try {
     client?.close();
     client = createMurmurClient();
-    client.on("message", message => logMessage(message.author, message.text, message.time));
-    client.on("widget", message => logMessage(message.author, `[${message.widget.type} widget]`, message.time));
+    client.on("message", message => logMessage(message.author, message.text, message.createdAt || message.time));
+    client.on("widget", message => logMessage(message.author, `[${message.widget.type} widget]`, message.createdAt || message.time));
     client.on("disconnected", detail => {
       onlineEl.textContent = "Disconnected";
       onlineEl.className = "tag bad";
@@ -72,7 +72,7 @@ document.getElementById("agent-connect-form").addEventListener("submit", async e
     renderHistory(history.messages || []);
     document.getElementById("agent-identity").textContent = `${name} · ${room}`;
     chatEl.hidden = false;
-    setStatus("Connected directly to the room host.");
+    setStatus("Connected to the shared Murmur room.");
     onlineEl.textContent = "Connected";
     onlineEl.className = "tag ok";
   } catch (error) {
