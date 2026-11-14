@@ -299,6 +299,22 @@ export class MurmurRoom extends DurableObject {
     }
   }
 
+  async _recordEvent(type, payload = {}, mutateState = null) {
+    const event = await this._mutate(state => {
+      if (mutateState) mutateState(state);
+      state.sequence += 1;
+      const item = { type, ...payload, cursor: state.sequence };
+      state.events ||= [];
+      state.events.push(item);
+      if (state.events.length > MAX_MESSAGES * 3) {
+        state.events.splice(0, state.events.length - MAX_MESSAGES * 3);
+      }
+      return item;
+    });
+    this._broadcast(event);
+    return event;
+  }
+
   async _appendMessage(message, type = "message.created") {
     const event = await this._mutate(state => {
       state.sequence += 1;
@@ -307,7 +323,13 @@ export class MurmurRoom extends DurableObject {
       if (state.messages.length > MAX_MESSAGES) {
         state.messages.splice(0, state.messages.length - MAX_MESSAGES);
       }
-      return { type, message };
+      const item = { type, message, cursor: state.sequence };
+      state.events ||= [];
+      state.events.push(item);
+      if (state.events.length > MAX_MESSAGES * 3) {
+        state.events.splice(0, state.events.length - MAX_MESSAGES * 3);
+      }
+      return item;
     });
     this._broadcast(event);
     return event;
@@ -355,6 +377,7 @@ export class MurmurRoom extends DurableObject {
       members: [owner],
       credentials,
       messages: [],
+      events: [],
       sequence: 0,
       tickets: {}
     });
@@ -401,7 +424,7 @@ export class MurmurRoom extends DurableObject {
       next.credentials[tokenHash] = member;
     });
 
-    this._broadcast({ type: "member.joined", member: { ...member, online: false } });
+    await this._recordEvent("member.joined", { member: { ...member, online: false } });
     await this._systemMessage(name + " joined the room.");
     return json({ roomId: state.room.id, accessToken, member }, 201);
   }
@@ -532,8 +555,10 @@ export class MurmurRoom extends DurableObject {
     }
 
     if (event.type === "widget.respond") {
-      let resultEvent = null;
-      await this._mutate(state => {
+      const resultEvent = await this._recordEvent("widget.resolved", {
+        id: event.id,
+        result: {}
+      }, state => {
         const message = state.messages.find(item => item.id === event.id && item.widget);
         if (!message || message.widget.type === "progress") throw new Error("Widget not found.");
         if (message.widget.result) throw new Error("Widget has already been resolved.");
@@ -550,15 +575,17 @@ export class MurmurRoom extends DurableObject {
             ...(Array.isArray(event.result?.steps) ? { steps: event.result.steps.slice(0, 20) } : {})
           };
         }
-        resultEvent = { type: "widget.resolved", id: message.id, result: message.widget.result };
+        // Replace the placeholder result with the normalized state value.
+        resultEvent.result = message.widget.result;
       });
-      if (resultEvent) this._broadcast(resultEvent);
-      return { accepted: true };
+      return { accepted: true, cursor: resultEvent.cursor };
     }
 
     if (event.type === "progress.update") {
-      let progressEvent = null;
-      await this._mutate(state => {
+      const progressEvent = await this._recordEvent("progress.updated", {
+        id: event.id,
+        percent: 0
+      }, state => {
         const message = state.messages.find(item => item.id === event.id && item.widget?.type === "progress");
         if (!message) throw new Error("Progress widget not found.");
         if (member.role !== "owner" && message.sender?.id !== member.id) {
@@ -567,10 +594,10 @@ export class MurmurRoom extends DurableObject {
         const percent = Number(event.percent);
         if (!Number.isFinite(percent)) throw new Error("Progress percentage must be numeric.");
         message.widget.data.percent = Math.max(0, Math.min(100, percent));
-        progressEvent = { type: "progress.updated", id: message.id, percent: message.widget.data.percent };
+        // Replace the placeholder percentage with the normalized value.
+        progressEvent.percent = message.widget.data.percent;
       });
-      if (progressEvent) this._broadcast(progressEvent);
-      return { accepted: true };
+      return { accepted: true, cursor: progressEvent.cursor };
     }
 
     throw new Error("Unsupported event type.");
@@ -635,6 +662,20 @@ export class MurmurRoom extends DurableObject {
         messages,
         total,
         nextCursor: messages.at(-1)?.cursor || after,
+        cursor: state.sequence
+      });
+    }
+
+    if (url.pathname === "/events" && request.method === "GET") {
+      const state = await this._state();
+      const after = Math.max(0, Number(url.searchParams.get("after") || 0));
+      const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") || 100)));
+      const events = (state.events || []).filter(item => item.cursor > after);
+      const page = events.slice(0, limit);
+      return json({
+        events: page,
+        total: events.length,
+        nextCursor: page.at(-1)?.cursor || after,
         cursor: state.sequence
       });
     }
@@ -711,7 +752,7 @@ export class MurmurRoom extends DurableObject {
           if (value.id === member.id) delete state.credentials[hash];
         }
       });
-      this._broadcast({ type: "member.left", member });
+      await this._recordEvent("member.left", { member });
       await this._systemMessage(member.name + " left the room.");
       return json({ left: true });
     }
