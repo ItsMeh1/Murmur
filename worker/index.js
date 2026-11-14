@@ -301,9 +301,9 @@ export class MurmurRoom extends DurableObject {
 
   async _recordEvent(type, payload = {}, mutateState = null) {
     const event = await this._mutate(state => {
-      if (mutateState) mutateState(state);
+      const extra = mutateState ? (mutateState(state) || {}) : {};
       state.sequence += 1;
-      const item = { type, ...payload, cursor: state.sequence };
+      const item = { type, ...payload, ...extra, cursor: state.sequence };
       state.events ||= [];
       state.events.push(item);
       if (state.events.length > MAX_MESSAGES * 3) {
@@ -556,8 +556,7 @@ export class MurmurRoom extends DurableObject {
 
     if (event.type === "widget.respond") {
       const resultEvent = await this._recordEvent("widget.resolved", {
-        id: event.id,
-        result: {}
+        id: event.id
       }, state => {
         const message = state.messages.find(item => item.id === event.id && item.widget);
         if (!message || message.widget.type === "progress") throw new Error("Widget not found.");
@@ -575,16 +574,14 @@ export class MurmurRoom extends DurableObject {
             ...(Array.isArray(event.result?.steps) ? { steps: event.result.steps.slice(0, 20) } : {})
           };
         }
-        // Replace the placeholder result with the normalized state value.
-        resultEvent.result = message.widget.result;
+        return { result: message.widget.result };
       });
       return { accepted: true, cursor: resultEvent.cursor };
     }
 
     if (event.type === "progress.update") {
       const progressEvent = await this._recordEvent("progress.updated", {
-        id: event.id,
-        percent: 0
+        id: event.id
       }, state => {
         const message = state.messages.find(item => item.id === event.id && item.widget?.type === "progress");
         if (!message) throw new Error("Progress widget not found.");
@@ -594,8 +591,7 @@ export class MurmurRoom extends DurableObject {
         const percent = Number(event.percent);
         if (!Number.isFinite(percent)) throw new Error("Progress percentage must be numeric.");
         message.widget.data.percent = Math.max(0, Math.min(100, percent));
-        // Replace the placeholder percentage with the normalized value.
-        progressEvent.percent = message.widget.data.percent;
+        return { percent: message.widget.data.percent };
       });
       return { accepted: true, cursor: progressEvent.cursor };
     }
