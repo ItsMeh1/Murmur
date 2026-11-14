@@ -28,12 +28,13 @@ export class MurmurClient extends EventEmitter {
     return data;
   }
 
-  openSocket() {
+  async openSocket() {
     if (typeof WebSocket !== "function") throw new Error("Node.js 22+ with global WebSocket is required.");
+    const ticket = await this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/connect-ticket", { method: "POST", body: {} });
     const url = new URL(this.apiBase + "/v1/rooms/" + encodeURIComponent(this.room) + "/connect");
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url, ["murmur.v1", "bearer." + this.accessToken]);
+      const socket = new WebSocket(url, ["murmur.v1", "ticket." + ticket.ticket]);
       this.socket = socket;
       let settled = false;
       const timer = setTimeout(() => {
