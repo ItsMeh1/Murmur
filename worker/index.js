@@ -425,7 +425,7 @@ export class MurmurRoom extends DurableObject {
       }
       const channel = CHANNELS.has(event.channel) ? event.channel : (type === "progress" ? "general" : "pending");
       const message = {
-        id: "widget_" + randomHex(12), cursor: 0, channel,
+        id: clean(event.id, 100) || ("widget_" + randomHex(12)), cursor: 0, channel,
         author: member.name, text: "", mentions: [], target: null,
         createdAt: new Date().toISOString(),
         sender: { id: member.id, name: member.name, kind: member.kind },
@@ -514,8 +514,10 @@ export class MurmurRoom extends DurableObject {
     }
     if (url.pathname === "/widgets" && request.method === "POST") {
       const body = await readJson(request);
-      await this._handleEvent(member, { type: "widget.create", ...body });
-      return json({ accepted: true }, 201);
+      if (!body || typeof body.widgetType !== "string" || !isObject(body.data)) return fail("widgetType and data are required.");
+      const id = clean(body.id, 100) || ("widget_" + randomHex(12));
+      await this._handleEvent(member, { type: "widget.create", ...body, id });
+      return json({ accepted: true, id }, 201);
     }
     const responseMatch = url.pathname.match(/^\/widgets\/([A-Za-z0-9_-]+)\/respond$/);
     if (responseMatch && request.method === "POST") {
