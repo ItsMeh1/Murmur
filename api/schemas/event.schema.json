@@ -11,11 +11,16 @@
         },
         "message": {
           "$ref": "message.schema.json"
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 1
         }
       },
       "required": [
         "type",
-        "message"
+        "message",
+        "cursor"
       ],
       "additionalProperties": false
     },
@@ -27,11 +32,16 @@
         },
         "message": {
           "$ref": "message.schema.json"
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 1
         }
       },
       "required": [
         "type",
-        "message"
+        "message",
+        "cursor"
       ],
       "additionalProperties": false
     },
@@ -46,11 +56,16 @@
         },
         "member": {
           "type": "object"
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 1
         }
       },
       "required": [
         "type",
-        "member"
+        "member",
+        "cursor"
       ]
     },
     {
@@ -67,11 +82,16 @@
           "items": {
             "type": "object"
           }
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 1
         }
       },
       "required": [
         "type",
-        "members"
+        "members",
+        "cursor"
       ]
     },
     {
@@ -85,12 +105,17 @@
         },
         "result": {
           "type": "object"
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 1
         }
       },
       "required": [
         "type",
         "id",
-        "result"
+        "result",
+        "cursor"
       ]
     },
     {
@@ -104,12 +129,17 @@
         },
         "percent": {
           "type": "number"
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 1
         }
       },
       "required": [
         "type",
         "id",
-        "percent"
+        "percent",
+        "cursor"
       ]
     },
     {
@@ -120,11 +150,16 @@
         },
         "error": {
           "type": "string"
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 1
         }
       },
       "required": [
         "type",
-        "error"
+        "error",
+        "cursor"
       ]
     }
   ]
