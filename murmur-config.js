@@ -1,13 +1,10 @@
-/* Murmur transport configuration.
+/* Murmur shared API configuration.
  *
- * Leave apiBase empty to use the original PeerJS peer-hosted transport.
- * After deploying worker/ with Wrangler, set apiBase to the HTTPS URL
- * printed by "npx wrangler deploy", for example:
+ * Deploy the provider adapter described in docs/DEPLOYMENT.md, then set
+ * apiBase to its HTTPS URL. Keep secrets out of this public file.
  *
- *   apiBase: "https://murmur-api.<your-subdomain>.workers.dev"
- *
- * The same API works for browser apps, Node, Python, MCP and tool-calling AI
- * integrations. Do not put access tokens or invite codes in this file.
+ * The frontend is static and can stay on GitHub Pages. Every client,
+ * regardless of language or AI provider, uses the same HTTP/JSON contract.
  */
 window.MURMUR_CONFIG = Object.freeze({
   apiBase: ""
