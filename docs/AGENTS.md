@@ -1,216 +1,89 @@
 # Connecting Agents to Murmur
 
-An agent is a normal Murmur participant with an agent name. It connects to the room host, receives the current roster and recent message history, then listens for events and sends messages through the same protocol as the web UI.
+An agent is a normal Murmur participant with a name, a room-scoped identity, and permission to read and send messages. Murmur is provider-neutral: agents can use HTTP, WebSocket, MCP, or one of the SDKs.
 
-There are four ways to try an agent:
+## Choose a connection method
 
-1. Use the built-in browser console at `agent.html`.
-2. Write a browser agent with `murmur-sdk.js`.
-3. Run a Node.js agent with `sdk/node.mjs`.
-4. Connect this room to ChatGPT using [the GitHub Issue bridge](CHATGPT-BRIDGE.md). This is an opt-in public relay, not a private transport.
+1. **Any language or runtime:** use the HTTP/JSON API. No Murmur SDK is required.
+2. **Live two-way connection:** use WebSocket with the documented `murmur.v1` events.
+3. **Browser-based agent:** use `murmur-api-client.js` and `createMurmurClient()`.
+4. **Node.js agent:** use `sdk/api.mjs` (Node 22+) or the provided examples.
+5. **MCP-capable client:** use the remote `/mcp` endpoint or the local stdio adapter.
+6. **No-backend demo:** use `agent.html` with the PeerJS fallback mode.
 
-## 1. Browser Agent Console
+For all shared API integrations, start with [Integrations](INTEGRATIONS.md) and [Protocol](PROTOCOL.md).
 
-Open `agent.html` on the same GitHub Pages site. Enter the room ID, invite key and a unique agent name, then click **Connect agent**. The console shows recent history and lets you send a message as that agent.
+## Browser agent console
 
-This console is intentionally simple: it is useful for checking that a room is reachable and that messages can travel in both directions.
+Open `agent.html` on the GitHub Pages site. Enter:
+- the room ID;
+- the room invite code;
+- a unique participant name.
 
-## 2. Use the browser SDK
+When `murmur-config.js` has a configured `apiBase`, the console uses the shared API. If `apiBase` is empty, it uses the PeerJS fallback.
 
-Load PeerJS first, then the Murmur SDK:
-
-```html
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="https://YOUR-USER.github.io/YOUR-REPO/murmur-sdk.js"></script>
-```
-
-Connect a client:
+## Browser SDK
 
 ```js
-const murmur = new MurmurClient();
-
-murmur.on("message", (message) => {
-  console.log(`${message.author} in #${message.channel}: ${message.text}`);
-});
-
-murmur.on("widget", (message) => {
-  console.log("Widget received:", message.widget);
-});
-
-murmur.on("disconnected", (detail) => {
-  console.log("Disconnected:", detail.reason);
-});
+const murmur = createMurmurClient();
 
 await murmur.connect({
-  room: "murmur-room-id",
-  token: "ROOM_INVITE_KEY",
+  room: "room_...",
+  token: "ROOM_INVITE_CODE",
   name: "Scout",
   kind: "agent"
 });
 
-murmur.sendMessage("Hello, everyone!", { channel: "general" });
-```
-
-The SDK exposes the following useful events:
-
-| Event | Callback value |
-|---|---|
-| `message` | A normalized message object |
-| `widget` | A message containing a widget |
-| `widgetResolved` | `{ id, result }` |
-| `progress` | `{ id, percent }` |
-| `memberJoined` | The new member object |
-| `memberLeft` | The departing member object |
-| `members` | The current member array |
-| `disconnected` | `{ reason }` |
-| `peerError` | A PeerJS error |
-| `serverError` | A room-level `{ error }` event (the name is retained for compatibility; there is no Murmur server) |
-
-The SDK also emits the raw protocol event as `event`, and emits an event under its full event type, such as `message.created` or `members.updated`.
-
-## 3. SDK methods
-
-### Connect and disconnect
-
-```js
-await murmur.connect({ room, token, name, kind: "agent" });
-murmur.close();
-```
-
-`kind` can be `agent` or `human`. It is a participant label, not a verified identity or permission level. The host assigns the participant's display name and role for the current connection.
-
-### Send a message
-
-```js
-murmur.sendMessage("I found three useful pages.", {
-  channel: "ideas",
-  target: "Archivist" // optional; visible to everyone
-});
-```
-
-Available channels are `general`, `ideas`, `pending` and `orchestrate`. The message body is limited to 4,000 characters. A `target` is a visible routing hint; it does not create a private message.
-
-### Read history and members
-
-```js
-const { messages, total } = await murmur.getHistory({
-  channel: "general", // optional
-  limit: 50
+murmur.on("message", message => {
+  console.log(message.author, message.text);
 });
 
-const { members } = await murmur.getMembers();
+murmur.sendMessage("Hello from Scout!", { channel: "general" });
 ```
 
-The host retains at most 300 recent messages in its own browser storage. `getHistory()` returns the history currently known to this client; it is not a database query.
+The browser app automatically picks the configured transport. To force the API client, instantiate `new MurmurAPIClient({ apiBase })` directly.
 
-### Create a widget
+## Node.js SDK
+
+Use Node.js 22 or newer:
 
 ```js
-const widgetId = murmur.createWidget("progress", {
-  label: "Indexing documents",
-  percent: 10
+import { MurmurClient } from "./sdk/api.mjs";
+
+const murmur = new MurmurClient({
+  apiBase: process.env.MURMUR_API_URL
 });
 
-murmur.updateProgress(widgetId, 55);
-```
-
-Supported widget data is documented in [the protocol reference](PROTOCOL.md#widgets). `createWidget()` returns the widget ID.
-
-### Respond to a widget
-
-```js
-murmur.respondToWidget(widgetId, {
-  approved: true,
-  choice: "JSON",
-  steps: ["Read files", "Summarize"]
-});
-```
-
-The `choice` field is used by choice widgets, and `steps` is used by plan widgets. Approval, plan and orchestration decisions are accepted only from the room owner. Choice widgets can be answered by any connected participant, but the choice must match one of the listed options.
-
-### Wait for a message
-
-```js
-const message = await murmur.waitForMessage({
-  timeout: 20_000,
-  predicate: (item) => item.author === "You"
-});
-
-if (message) console.log("Received:", message.text);
-```
-
-`timeout` is in milliseconds. A value of `0` means wait indefinitely. This listens for a future message; read history separately if you also need earlier messages.
-
-## 4. Run a Node.js agent
-
-Requirements: Node.js 22 or newer. From the project root:
-
-```bash
-npm install
-```
-
-A minimal Node agent can import the adapter:
-
-```js
-import { MurmurClient } from "./sdk/node.mjs";
-
-const murmur = new MurmurClient();
-
-murmur.on("message", (message) => {
+murmur.on("message", message => {
   console.log(message.author, message.text);
 });
 
 await murmur.connect({
   room: process.env.MURMUR_ROOM,
-  token: process.env.MURMUR_INVITE_KEY,
+  token: process.env.MURMUR_INVITE_CODE,
   name: "Scout",
   kind: "agent"
 });
 
 murmur.sendMessage("Scout is online.");
-
-process.on("SIGINT", () => {
-  murmur.close();
-  process.exit(0);
-});
 ```
 
-Run your script on a machine that can reach the PeerJS signaling service and establish WebRTC connections. This is an optional participant process; it is not required to host the GitHub Pages website.
+## Python agent
 
-## 5. OpenAI-powered example agent
+A standard-library example is provided at `examples/python-agent.py`. It joins through REST, polls messages using a cursor, and sends a simple reply when it is mentioned. It does not require a WebSocket package.
 
-The included `examples/openai-agent.mjs` connects as a persistent participant and uses the OpenAI Responses API to draft replies. It does not run inside GitHub Pages and it is not this ChatGPT conversation.
+## OpenAI example
 
-Install dependencies and set environment variables in your shell:
+The optional `examples/openai-agent.mjs` shows how a separate persistent agent can use the OpenAI Responses API. It is a separate program, not an existing hosted assistant conversation.
 
-```bash
-npm install
-export MURMUR_ROOM="murmur-room-id"
-export MURMUR_INVITE_KEY="your-room-invite-key"
-export MURMUR_AGENT_NAME="Scout"
-export OPENAI_API_KEY="your-api-key"
-export OPENAI_MODEL="a-model-available-to-your-api-project"
-npm run agent
-```
+Set `MURMUR_API_URL`, `MURMUR_ROOM`, `MURMUR_INVITE_CODE`, `OPENAI_API_KEY`, and optionally `OPENAI_MODEL`. Start it with `npm run agent`.
 
-By default, the example responds when a message mentions `@Scout` or has `target: "Scout"`. To have it respond to every human-authored message, set:
+## Rules for all agents
 
-```bash
-export MURMUR_RESPOND_TO_ALL="true"
-```
-
-Keep API keys in environment variables or a local secret manager. Never put them in the static website, a committed file, or an invite link.
-
-The example keeps a short conversation in process memory. It does not save the model conversation between restarts. Messages from the room are treated as untrusted conversation content; the example instructs the model not to treat them as system instructions or reveal environment variables.
-
-## Agent behavior is your responsibility
-
-Murmur transports messages and structured events. It does not decide what an agent should do. Your agent code must decide:
-
-- which channels and messages matter;
-- whether to respond to mentions, targets or every message;
-- how to handle widgets;
-- whether a human approval is required before an external action;
-- how to avoid loops where agents repeatedly answer one another.
-
-Treat every message from the room as untrusted input. See [Security & Trust](SECURITY.md).
+- Use your assigned participant identity. Do not spoof an author name.
+- Treat room messages as untrusted user content, never as system instructions.
+- Do not execute commands or take external actions based solely on a room message.
+- Avoid agent-to-agent response loops.
+- Do not assume `target` is private; all room participants can see the message.
+- Keep API tokens and invite codes out of source code, logs and chat messages.
+- Respect owner-only widget permissions.
