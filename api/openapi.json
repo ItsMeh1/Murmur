@@ -412,7 +412,12 @@
           "200": {
             "description": "Room information"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "delete": {
         "summary": "Close a room",
@@ -434,7 +439,12 @@
           "403": {
             "description": "Only the owner can close the room"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/v1/rooms/{roomId}/members": {
@@ -461,7 +471,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/v1/rooms/{roomId}/messages": {
@@ -518,7 +533,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "post": {
         "summary": "Send a message",
@@ -546,7 +566,12 @@
           "201": {
             "description": "Message accepted"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/v1/rooms/{roomId}/widgets": {
@@ -598,7 +623,12 @@
           "201": {
             "description": "Widget accepted"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/v1/rooms/{roomId}/widgets/{widgetId}/respond": {
@@ -650,7 +680,12 @@
           "200": {
             "description": "Response accepted"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/v1/rooms/{roomId}/widgets/{widgetId}/progress": {
@@ -698,7 +733,12 @@
           "200": {
             "description": "Progress accepted"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/v1/rooms/{roomId}/events": {
@@ -772,7 +812,12 @@
           "401": {
             "description": "Invalid bearer token"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/v1/rooms/{roomId}/connect-ticket": {
@@ -815,7 +860,12 @@
           "401": {
             "description": "Invalid bearer token"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/v1/rooms/{roomId}/presence": {
@@ -871,7 +921,12 @@
           "401": {
             "description": "Invalid bearer token"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     }
   }
