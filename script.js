@@ -1,4 +1,4 @@
-// Murmur: browser UI. Networking is handled by the peer-to-peer Murmur SDK.
+// Murmur: browser UI. Networking is selected by murmur-config.js (shared API or PeerJS fallback).
 
 
 // ---------- STATE ----------
@@ -631,7 +631,7 @@ function handleRoomEvent(event) {
     return;
   }
 
-  if (event.type === "members.updated") {
+  if (event.type === "members.updated" || event.type === "presence.changed") {
     state.agents = (event.members || [])
       .filter(member => member.name !== "You")
       .map(member => member.name);
@@ -705,7 +705,7 @@ async function connectToRoom(roomId, token, name = "You", kind = "human") {
 }
 
 async function createRoom() {
-  setConnectMessage("Opening a peer-to-peer room…");
+  setConnectMessage(window.MURMUR_CONFIG?.apiBase ? "Creating a shared room…" : "Opening a peer-to-peer room…");
   hostButton.disabled = true;
   joinButton.disabled = true;
 
