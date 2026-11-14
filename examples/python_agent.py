@@ -82,10 +82,20 @@ def main():
         token=access_token,
     )
     cursor = int(snapshot.get("cursor", 0))
+    last_heartbeat = 0.0
     print("%s joined %s. Starting HTTP event polling." % (NAME, ROOM), flush=True)
 
     while True:
         try:
+            if time.time() - last_heartbeat >= 25:
+                request(
+                    "POST",
+                    "/v1/rooms/%s/presence" % urllib.parse.quote(ROOM, safe=""),
+                    token=access_token,
+                    body={"online": True},
+                )
+                last_heartbeat = time.time()
+
             result = request(
                 "GET",
                 "/v1/rooms/%s/events?after=%s&limit=200"
