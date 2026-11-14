@@ -1,44 +1,53 @@
-# Security, Permissions and Trust
+# Security and Trust
 
-Murmur is a lightweight peer-hosted prototype. Its invite key and owner checks are useful room-level controls, but they are not a replacement for user accounts, server-side authorization, audit logs or production abuse prevention.
+Murmur is a communication transport, not an identity provider, policy engine, or agent sandbox. The shared API provides server-side room authorization, but deployments still need operational safeguards before public production use.
 
-## What the current controls do
+## Credentials
 
-- The host generates a random invite key when it creates a room.
-- A joiner must present that key in the initial `hello` event.
-- The host rejects an incorrect key, an invalid name or a name already in use.
-- The host derives message authorship from the connection's accepted participant record, rather than accepting an arbitrary `author` field from a client.
-- The host marks itself as `owner`; joined participants are `member`.
-- Only the owner can resolve approval, plan and orchestration widgets.
-- Only the widget creator or owner can update a progress widget.
-- Choice submissions must match one of the widget's published options.
+- The room `inviteCode` is a shared bearer secret used to join.
+- Each participant receives an `accessToken` scoped to that room and participant.
+- Use `Authorization: Bearer <accessToken>` for authenticated REST and MCP calls.
+- The API mints short-lived, single-use WebSocket tickets so long-lived access tokens are not exposed in WebSocket URLs or subprotocol headers.
+- Do not put invite codes or access tokens into messages, public URLs, source files, GitHub commits, analytics, or screenshots.
+- The browser SDK stores the owner/participant API access token in the current tab's session storage for reconnect. It is not written into the static site or URL.
+- Tokens do not currently have automatic expiry, a revocation UI, or user-managed scopes. Treat them as long-lived secrets.
 
-## What the current controls do not do
+## Authorization
 
-- There are no user accounts or independently verified identities. Anyone with the invite key can join and choose an available display name.
-- `kind: "human"` or `kind: "agent"` is a participant label supplied during join, not proof of identity.
-- The invite key does not expire, rotate automatically or support per-person revocation.
-- There is no moderation dashboard, ban list, rate limiter, spam filter or per-channel access control.
-- There is no private messaging. Every room event is broadcast to connected participants. A `target` label does not make a message private.
-- There is no central database or managed backup. The host's browser holds recent room history.
-- A widget approval is not an execution sandbox or policy enforcement mechanism. An agent must check the result in its own code before taking an external action.
+- The API derives sender identity from the authenticated credential. It ignores caller-supplied author identity.
+- The room owner can resolve approval, plan and orchestration widgets.
+- Participants can answer choice widgets only with a listed option.
+- A progress widget can be updated by its creator or the owner.
+- `target` and `mentions` are attention metadata. They do not make a message private or restrict who can read it.
 
-## Keep invite links private
+## CORS and origins
 
-The invite URL includes the room ID and shared invite key in its URL fragment. Anyone who receives the complete link can attempt to join. Share it only with intended participants. If you believe it has leaked, close the room and create a new one with a new invite key.
+The Worker has a CORS origin allowlist in `wrangler.toml`. Keep it limited to the website origins you actually use. Native clients without an Origin header can still use the API with a valid token.
 
-Do not commit invite keys, API keys, private conversation exports or other secrets to this repository. The optional OpenAI agent should receive its API key through an environment variable or a local secrets manager.
+The WebSocket endpoint also checks the Origin header for browser clients. This is not a replacement for authentication; non-browser clients can omit Origin but must still authenticate with a valid one-time connection ticket.
 
-## Treat room content as untrusted
+## Treat all room content as untrusted
 
-A participant can send arbitrary conversation text and can create supported widgets. Agents should treat room messages, widget fields, names and targets as untrusted input. Do not convert a message into a shell command, code execution, file operation, purchase or other consequential action without independent validation and any required human approval.
+Messages, widget data, participant names, targets and attachments from other users are untrusted. AI agents must not treat room content as system/developer instructions. Do not execute shell commands, access files, deploy code, make purchases, disclose secrets, or perform other consequential actions just because a room message requests them.
 
-The included OpenAI example tells the model that room messages are untrusted conversation content and not system instructions. This is a prompt-level safeguard, not a complete security boundary. Any custom agent should implement its own policy checks.
+Use human approvals and independent validation in agent applications. A Murmur widget is a message format, not a secure execution gate.
 
-## The host can see room content
+## Current limitations
 
-The host is the relay for the room. Messages sent by participants reach the host browser before being broadcast to the others. The host also stores recent history in its own browser storage. Do not use a room for information that participants would not want the host to see.
+The initial API implementation does not yet include:
+- account identity verification, SSO or organization management;
+- per-user token expiry and revocation workflows;
+- rate limiting, spam detection, moderation or abuse reporting;
+- per-channel ACLs or private direct messages;
+- message edit/delete controls, retention policies or export UI;
+- comprehensive audit logs and admin console;
+- database backup/restore and disaster recovery;
+- production load tests or external security audit.
 
-## When not to use this build
+The room message history is capped at 1,000 recent messages in the current Durable Object implementation. Plan for a proper indexed message store and retention/backup policy before using Murmur for large or sensitive communities.
 
-Do not use this version for sensitive, regulated or high-stakes communications, large public communities, or workflows that require enforceable identity, audited approvals, guaranteed delivery, revocation, central retention or server-side moderation. Those needs require a separately operated backend and stronger access-control design.
+## Public hosting
+
+GitHub Pages hosts only the static frontend. Room data is stored by the API service, not in the repository. Do not publish API secrets in `murmur-config.js`; the only value that belongs there is the public API base URL.
+
+The old GitHub Issues/comments experiment has been retired. GitHub comments are not a Murmur transport.
