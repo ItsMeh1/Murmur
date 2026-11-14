@@ -62,6 +62,9 @@ test("API client joins, obtains a one-time WebSocket ticket and sends provider-n
     if (parsed.pathname.endsWith("/messages")) {
       return Response.json({ messages: [], total: 0, nextCursor: 0, cursor: 0 });
     }
+    if (parsed.pathname.endsWith("/presence")) {
+      return Response.json({ updated: true, online: true });
+    }
     throw new Error("Unexpected request: " + parsed.pathname);
   };
 
