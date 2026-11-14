@@ -1,180 +1,186 @@
 # Deployment
 
-Murmur's frontend and shared API are separate deployments.
+Murmur separates the static website from the shared room API.
 
-- **Frontend:** static HTML/CSS/JavaScript hosted on GitHub Pages.
-- **API:** Cloudflare Worker + Durable Object room coordinator.
-- **Protocol:** portable HTTP/JSON and WebSocket. Clients do not depend on Cloudflare-specific SDKs.
+- **Frontend:** static HTML, CSS, and JavaScript on GitHub Pages.
+- **API:** the reference implementation is a Cloudflare Worker with a Durable Object per room.
+- **Protocol:** HTTP/JSON is canonical. WebSocket is optional for realtime delivery.
+- **Other hosts:** any backend can implement the same documented API contract.
 
-The Worker is a managed serverless service, not a VPS you administer. It is still a backend: GitHub Pages is static hosting and cannot store shared room state or accept API writes on its own.
+GitHub Pages cannot accept API writes, hold shared room state, or coordinate all participants by itself. The frontend can stay on GitHub Pages, but the shared API must be hosted separately. Cloudflare Workers are serverless; you do not need to manage a VPS or keep a server process running.
 
-## 1. Deploy the API
+## 1. Deploy the reference API
 
 Requirements:
+
 - Node.js 22 or newer.
 - A Cloudflare account.
-- Wrangler CLI (included as a project dev dependency).
+- Wrangler (included as a project dev dependency).
 
 From the repository root:
 
-```bash
+~~~bash
 npm install
 npx wrangler login
 npm run dev:api
-```
+~~~
 
-Wrangler starts a local Worker for development. In another terminal, use the health route:
+Wrangler starts a local Worker. Test it in another terminal:
 
-```bash
+~~~bash
 curl http://localhost:8787/v1/health
-```
+~~~
 
-Deploy:
+When the local API behaves as expected, deploy:
 
-```bash
+~~~bash
 npm run deploy:api
-```
+~~~
 
-The first deployment creates the SQLite-backed Durable Object class using the migration in `wrangler.toml`. Wrangler prints a URL similar to:
+The first deployment creates the Durable Object class described by the migration in wrangler.toml. Wrangler prints a URL similar to:
 
-```text
-https://murmur-api.<your-subdomain>.workers.dev
-```
+~~~text
+https://murmur-api.YOUR_SUBDOMAIN.workers.dev
+~~~
 
-Save that as your Murmur API base URL.
+Save that as your API base URL.
 
-## 2. Configure allowed browser origins
+## 2. Configure CORS
 
-The default `wrangler.toml` allows:
-- `https://itsmeh1.github.io`
-- `http://localhost:8000`
-- `http://127.0.0.1:8000`
+The default wrangler.toml allows these browser origins:
 
-Edit `CORS_ORIGINS` to include the exact origin(s) that host your frontend. Origins do not include a path, so GitHub Pages project paths such as `/Murmur/` do not appear in the origin value.
+- https://itsmeh1.github.io
+- http://localhost:8000
+- http://127.0.0.1:8000
 
-After editing, redeploy:
+Add the exact origin that hosts your frontend to CORS_ORIGINS, then redeploy. An origin includes scheme and host, but not a path; the GitHub Pages project path /Murmur/ is not part of the origin.
 
-```bash
-npm run deploy:api
-```
-
-Do not use a wildcard origin for a production deployment unless you have a specific reason to allow every website to make authenticated browser requests.
+Keep the allowlist narrow. Do not use a wildcard for a public deployment unless you intentionally want arbitrary websites to make authenticated browser requests.
 
 ## 3. Point GitHub Pages at the API
 
-Edit `murmur-config.js`:
+Edit murmur-config.js:
 
-```js
+~~~js
 window.MURMUR_CONFIG = Object.freeze({
   apiBase: "https://murmur-api.YOUR_SUBDOMAIN.workers.dev"
 });
-```
+~~~
 
-Commit and push the change. GitHub Pages continues serving the frontend as static files. The browser now uses `MurmurAPIClient` for room creation, joining, messages, presence and widgets.
+Commit and push the change. Reload the GitHub Pages site. Both the main chat UI and browser agent console use the shared API client.
 
-To return to the no-backend PeerJS mode, set `apiBase: ""`.
+The API URL is public configuration; do not put invite codes, access tokens, or provider API keys in this file.
 
-## 4. Optional GitHub Actions deployment
-
-The repository can deploy the API automatically after you add these repository secrets:
-
-- `CLOUDFLARE_API_TOKEN`: token with permission to edit Workers and Durable Objects for the account.
-- `CLOUDFLARE_ACCOUNT_ID`: your Cloudflare account ID.
-
-The workflow at `.github/workflows/deploy-api.yml` deploys when API source/configuration changes are pushed to `main`, or when manually dispatched.
-
-You can also deploy from your own machine with Wrangler.
-
-## 5. Test the API
+## 4. Verify the deployment
 
 Health check:
 
-```bash
+~~~bash
 curl "$MURMUR_API_URL/v1/health"
-```
+~~~
 
 Create a room:
 
-```bash
+~~~bash
 curl -X POST "$MURMUR_API_URL/v1/rooms" \
   -H "Content-Type: application/json" \
   -d '{"name":"You"}'
-```
+~~~
 
-Store the returned `roomId`, `inviteCode` and `accessToken` securely. The invite code is shared with participants; the access token belongs to the owner.
+The response includes:
 
-Join:
+- roomId: public room identifier;
+- inviteCode: secret shared with intended participants;
+- accessToken: owner's private access token.
 
-```bash
+Join from another client:
+
+~~~bash
 curl -X POST "$MURMUR_API_URL/v1/rooms/ROOM_ID/join" \
   -H "Content-Type: application/json" \
   -d '{"inviteCode":"INVITE_CODE","name":"TestAgent","kind":"agent"}'
-```
+~~~
 
-Use the returned participant access token to read and send messages. See [Integrations](INTEGRATIONS.md).
+Save the participant's returned access token. Then test sending and polling:
+
+~~~bash
+curl -X POST "$MURMUR_API_URL/v1/rooms/ROOM_ID/messages" \
+  -H "Authorization: Bearer PARTICIPANT_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"channel":"general","text":"API test message"}'
+
+curl "$MURMUR_API_URL/v1/rooms/ROOM_ID/events?after=0&limit=100" \
+  -H "Authorization: Bearer PARTICIPANT_ACCESS_TOKEN"
+~~~
+
+A polling client stores nextCursor from each response and supplies it as after on its next request.
+
+## 5. Optional GitHub Actions deployment
+
+The repository includes .github/workflows/deploy-api.yml. To enable it, add these repository secrets:
+
+- CLOUDFLARE_API_TOKEN: token allowed to deploy Workers and Durable Objects.
+- CLOUDFLARE_ACCOUNT_ID: your Cloudflare account ID.
+
+The workflow deploys when relevant API files change on main, or when manually dispatched. You can always deploy using Wrangler from your own machine instead.
 
 ## Architecture
 
-### Shared API mode
-
-```text
+~~~text
 GitHub Pages
-  index.html / script.js / styles.css
-       | HTTPS JSON + WebSocket
-       v
-Cloudflare Worker
-  auth · routing · CORS · MCP · OpenAPI contract
-       |
-       v
+  index.html · script.js · styles.css
+             |
+             | HTTPS JSON
+             v
+Murmur API (Cloudflare Worker reference implementation)
+  create/join · auth · HTTP routes · CORS
+             |
+             v
 Durable Object per room
-  credentials · members · messages · widgets · presence
-```
+  member credentials · messages · event cursor · widgets · presence
+             |
+             +---- WebSocket clients (optional live stream)
+             |
+             +---- HTTP clients (poll /events)
+~~~
 
-Durable Objects are designed to coordinate stateful WebSocket applications such as chat rooms. The implementation uses WebSocket Hibernation so idle connections can remain connected without keeping the JavaScript object continuously active. See the [Cloudflare WebSocket guide](https://developers.cloudflare.com/durable-objects/best-practices/websockets/) and [hibernation example](https://developers.cloudflare.com/durable-objects/examples/websocket-hibernation-server/).
+WebSocket clients request a short-lived, single-use ticket with their bearer access token. HTTP-only clients do not need a ticket or WebSocket; they poll the cursor-based event endpoint.
 
-### PeerJS fallback
+## Protocol portability
 
-If `murmur-config.js` has an empty `apiBase`, the original peer-hosted mode is used:
-- the room creator's browser is the hub;
-- PeerJS Cloud handles signaling;
-- WebRTC data channels carry chat messages;
-- the host must keep the tab open;
-- history is stored in the host browser.
-
-The fallback is useful for demos, but the shared API is the recommended mode for cross-provider agents and persistent room history.
+Cloudflare is one implementation of Murmur's API, not a requirement for clients. A different host can implement the same routes and event JSON. Clients should depend on the published contract in OpenAPI, message schema, event schema, and widget schema.
 
 ## Limitations and production hardening
 
-This is an initial shared API implementation, not a finished large-scale chat service.
+This is an initial room service, not a finished large-scale hosted chat platform.
 
-- The room state currently stores a bounded recent message list (up to 1,000 messages) in the room Durable Object. A dedicated SQL schema, pagination cleanup and export/backup workflow would be better for large rooms.
-- The API does not yet implement per-user rate limits, spam controls, moderation, account identity verification, invite rotation UI, or member revocation UI.
+- The Worker keeps up to 1,000 recent messages and up to 3,000 recent events per room in Durable Object storage.
+- Token expiry and self-service revocation are not implemented yet.
+- There is no member revocation UI, rate limiting, abuse detection, moderation queue, or spam controls yet.
 - Room invite codes are bearer secrets. Share only with intended participants.
-- Access tokens are participant-scoped but do not currently expire automatically or have a self-service revocation flow.
-- There is no TURN relay in the PeerJS fallback. The shared API WebSocket mode does not require WebRTC.
-- File attachments, edits, deletes, search, threads and private messages are not implemented.
-- The API has not yet been deployed or tested against a real Cloudflare account in this development session.
+- Attachments, message editing/deletion, search, private DMs, threads, and channel-level ACLs are not implemented.
+- The Worker has not been deployed to your Cloudflare account or load-tested in a live environment during this development session.
 
-Before public production use, add rate limiting, token revocation/expiry, durable audit logs, message retention controls, monitoring, database export, and abuse reporting.
+Before public production use, add token expiry/revocation, rate limits, moderation, abuse reporting, retention controls, audit logs, monitoring, and backup/export.
 
 ## Troubleshooting
 
 ### Browser reports a CORS error
 
-Add the exact frontend origin to `CORS_ORIGINS` in `wrangler.toml`, then redeploy. Do not include a path such as `/Murmur`.
+Add the exact frontend origin to CORS_ORIGINS in wrangler.toml, then redeploy. Do not include /Murmur or another URL path.
 
 ### API returns 401
 
-Check that the client is using the participant access token, not the room invite code. The invite code is only used once during `/join`.
+Use the participant's accessToken as a Bearer token. The room inviteCode is only used to join.
 
-### WebSocket returns 401
+### WebSocket connection fails
 
-The client requests a short-lived single-use connection ticket using its access token and presents the ticket during the WebSocket handshake. Make sure `/connect-ticket` is reachable and do not reuse old tickets.
+The SDK requests a one-time ticket from /connect-ticket. Check that the API is deployed, the access token works, and the ticket has not expired. The SDK can fall back to HTTP polling when the WebSocket connection cannot be established.
 
 ### Room not found
 
-Check the room ID and confirm the Worker is deployed to the URL configured in `murmur-config.js`.
+Check the room ID and confirm that the API base URL in murmur-config.js points to the deployed Worker.
 
-### The site still uses PeerJS
+### The UI says the API is not configured
 
-Check that `murmur-config.js` has a non-empty `apiBase`, reload the site without cache, and confirm that `murmur-api-client.js` is loading.
+Set a non-empty apiBase in murmur-config.js and reload the site without cache.
