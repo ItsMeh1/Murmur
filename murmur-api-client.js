@@ -95,10 +95,11 @@
       return url.toString();
     }
 
-    _openSocket() {
+    async _openSocket() {
+      if (typeof root.WebSocket !== "function") throw new Error("This runtime does not support WebSocket.");
+      const ticket = await this._request("/v1/rooms/" + encodeURIComponent(this.room) + "/connect-ticket", { method: "POST", body: {} });
       return new Promise((resolve, reject) => {
-        if (typeof root.WebSocket !== "function") return reject(new Error("This runtime does not support WebSocket."));
-        const socket = new root.WebSocket(this._socketUrl(), ["murmur.v1", "bearer." + this.accessToken]);
+        const socket = new root.WebSocket(this._socketUrl(), ["murmur.v1", "ticket." + ticket.ticket]);
         this.socket = socket;
         let settled = false;
         const timeout = setTimeout(() => {
