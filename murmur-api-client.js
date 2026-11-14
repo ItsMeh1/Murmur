@@ -1,6 +1,6 @@
-/* Murmur's provider-neutral HTTP + WebSocket client.
- * Load after murmur-sdk.js. Configure window.MURMUR_CONFIG.apiBase to use
- * the hosted API; otherwise the existing PeerJS client remains the fallback.
+/* Murmur's provider-neutral HTTP/JSON + optional WebSocket client.
+ * Load after murmur-config.js. The API URL is the only public configuration.
+ * Clients without WebSocket support can use REST writes and event polling.
  */
 (function (root) {
   "use strict";
@@ -363,6 +363,21 @@
 
     async getRoom() {
       return this._request("/v1/rooms/" + encodeURIComponent(this.room));
+    }
+
+    async resume({ room, accessToken, inviteCode } = {}) {
+      if (!room || !accessToken) throw new Error("Room ID and participant access token are required.");
+      if (this.connected) throw new Error("This client is already connected.");
+      this.room = room;
+      this.accessToken = accessToken;
+      this.inviteToken = inviteCode || null;
+      const snapshot = await this.getRoom();
+      this.participant = snapshot.participant;
+      this.members = snapshot.members || [];
+      this.isHost = this.participant?.role === "owner";
+      await this.getHistory({ limit: 300 });
+      await this._openSocket();
+      return this;
     }
 
     async endRoom() {
