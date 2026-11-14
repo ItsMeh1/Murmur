@@ -675,7 +675,7 @@ async function connectToRoom(roomId, token, name = "You", kind = "human") {
 
   try {
     client?.close();
-    const nextClient = new MurmurClient();
+    const nextClient = createMurmurClient();
     bindClient(nextClient);
     await nextClient.connect({ room: roomId, token, name, kind });
     const history = await nextClient.getHistory({ limit: 300 });
@@ -712,7 +712,7 @@ async function createRoom() {
   const savedToken = localStorage.getItem("murmur.hostToken");
   try {
     client?.close();
-    let nextClient = new MurmurClient();
+    let nextClient = createMurmurClient();
     bindClient(nextClient);
     let created;
     try {
@@ -721,7 +721,7 @@ async function createRoom() {
       // The saved peer ID may still be registered in another open tab.
       if (!savedRoom || error?.type !== "unavailable-id") throw error;
       nextClient.close();
-      nextClient = new MurmurClient();
+      nextClient = createMurmurClient();
       bindClient(nextClient);
       created = await nextClient.createRoom();
     }
