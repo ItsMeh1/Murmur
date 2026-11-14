@@ -169,8 +169,15 @@
             clearTimeout(timeout);
             reject(new Error("Murmur WebSocket closed before welcome (" + event.code + ")."));
           }
-          if (wasConnected) this.emit("disconnected", { reason: "Realtime connection closed.", code: event.code });
-          if (!this._closing && this.accessToken) this._scheduleReconnect();
+          if (wasConnected && !this._closing && this.accessToken) {
+            this.emit("transportFallback", { transport: "http-polling", reason: "WebSocket disconnected." });
+            this._startHttpPolling("WebSocket disconnected").catch(error => {
+              this.emit("serverError", { error: error.message });
+              this.emit("disconnected", { reason: error.message, code: event.code });
+            });
+          } else if (wasConnected) {
+            this.emit("disconnected", { reason: "Realtime connection closed.", code: event.code });
+          }
         });
       }).catch(async error => {
         // REST is the canonical transport. If WebSocket is blocked, retain a
