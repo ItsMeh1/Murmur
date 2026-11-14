@@ -59,6 +59,10 @@ function corsHeaders(request, env) {
 function withCors(response, request, env) {
   const headers = new Headers(response.headers);
   for (const [key, value] of Object.entries(corsHeaders(request, env))) headers.set(key, value);
+  // Cloudflare WebSocket upgrade responses must retain their webSocket handle.
+  if (response.status === 101 && response.webSocket) {
+    return new Response(null, { status: 101, webSocket: response.webSocket, headers });
+  }
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
@@ -188,6 +192,9 @@ export default {
       if (!allowedOrigin(request, env)) return fail("Origin is not allowed.", 403, "origin_denied");
       return new Response(null, { status: 204, headers: corsHeaders(request, env) });
     }
+    if (!allowedOrigin(request, env)) {
+      return withCors(fail("Origin is not allowed.", 403, "origin_denied"), request, env);
+    }
 
     let response;
     if (url.pathname === "/v1/health" && request.method === "GET") {
@@ -303,7 +310,8 @@ export class MurmurRoom extends DurableObject {
       credentials,
       messages: [],
       sequence: 0,
-      widgets: {}
+      widgets: {},
+      tickets: {}
     });
     return json({ roomId: body.roomId, inviteCode: body.inviteCode, accessToken: body.ownerToken, member: owner });
   }
@@ -334,13 +342,14 @@ export class MurmurRoom extends DurableObject {
     if (!allowedOrigin(request, this.env)) return fail("Origin is not allowed.", 403, "origin_denied");
     const protocolHeader = request.headers.get("Sec-WebSocket-Protocol") || "";
     const protocols = protocolHeader.split(",").map(value => value.trim());
-    const bearer = protocols.find(value => value.startsWith("bearer."));
-    if (!bearer) return fail("A bearer token subprotocol is required.", 401, "unauthorized");
-    const token = bearer.slice("bearer.".length);
-    const tokenHash = await sha256(token);
+    const ticketProtocol = protocols.find(value => value.startsWith("ticket."));
+    if (!ticketProtocol) return fail("A short-lived connection ticket is required.", 401, "unauthorized");
+    const ticketHash = await sha256(ticketProtocol.slice("ticket.".length));
     const state = await this._state();
-    const member = state?.credentials?.[tokenHash];
-    if (!member) return fail("Invalid room access token.", 401, "unauthorized");
+    const ticket = state?.tickets?.[ticketHash];
+    if (!ticket || ticket.expiresAt < Date.now()) return fail("Connection ticket is invalid or expired.", 401, "unauthorized");
+    const member = ticket.member;
+    await this._mutate(next => { delete next.tickets[ticketHash]; });
 
     const pair = new WebSocketPair();
     const client = pair[0];
@@ -473,6 +482,14 @@ export class MurmurRoom extends DurableObject {
     if (url.pathname === "/" && request.method === "GET") {
       const state = await this._state();
       return json({ room: state.room, participant: member, members: this._membersWithPresence(state), messageCount: state.messages.length, cursor: state.sequence });
+    }
+    if (url.pathname === "/connect-ticket" && request.method === "POST") {
+      const ticket = randomHex(24);
+      const ticketHash = await sha256(ticket);
+      await this._mutate(state => {
+        state.tickets[ticketHash] = { member, expiresAt: Date.now() + 60000 };
+      });
+      return json({ ticket, expiresIn: 60 });
     }
     if (url.pathname === "/members" && request.method === "GET") {
       const state = await this._state();
