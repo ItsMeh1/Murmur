@@ -5,7 +5,7 @@ const CHANNELS = new Set(["general", "ideas", "pending", "orchestrate"]);
 const WIDGETS = new Set(["approval", "plan", "orchestrate", "choice", "progress"]);
 const MAX_MESSAGES = 1000;
 const MAX_MESSAGE_LENGTH = 4000;
-const MCP_PROTOCOL_VERSION = "2025-11-25";
+const MCP_PROTOCOL_VERSION = "2026-07-28";
 
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
@@ -48,7 +48,7 @@ function corsHeaders(request, env) {
   return {
     "access-control-allow-origin": allowedOrigin,
     "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
-    "access-control-allow-headers": "Authorization, Content-Type, Sec-WebSocket-Protocol, MCP-Protocol-Version",
+    "access-control-allow-headers": "Authorization, Content-Type, Sec-WebSocket-Protocol, MCP-Protocol-Version, Mcp-Method, Mcp-Name",
     "access-control-expose-headers": "Content-Type, X-Murmur-API-Version",
     "access-control-max-age": "86400",
     "vary": "Origin",
@@ -82,12 +82,10 @@ async function proxyRoom(env, id, path, request) {
   const stub = env.ROOMS.getByName(id);
   const target = new URL("https://room.internal" + path);
   target.search = new URL(request.url).search;
-  return stub.fetch(new Request(target, request));
-}
-
-async function handleMcp(request, env) {
+  return stub.fetch(new Request(async function handleMcp(request, env) {
   if (!allowedOrigin(request, env)) return fail("Origin is not allowed.", 403, "origin_denied");
   if (request.method !== "POST") return fail("MCP uses POST requests.", 405, "method_not_allowed");
+
   const payload = await readJson(request);
   if (!isObject(payload) || payload.jsonrpc !== "2.0" || typeof payload.method !== "string") {
     return json({ jsonrpc: "2.0", id: payload?.id ?? null, error: { code: -32600, message: "Invalid JSON-RPC request." } }, 400);
@@ -95,13 +93,33 @@ async function handleMcp(request, env) {
 
   const id = payload.id ?? null;
   const method = payload.method;
-  if (method === "notifications/initialized" || method === "notifications/cancelled") {
-    return new Response(null, { status: 202 });
+  const params = isObject(payload.params) ? payload.params : {};
+  const metadata = isObject(params._meta) ? params._meta : {};
+  const bodyVersion = metadata["io.modelcontextprotocol/protocolVersion"];
+  const headerVersion = request.headers.get("MCP-Protocol-Version");
+  const methodHeader = request.headers.get("Mcp-Method");
+  const nameHeader = request.headers.get("Mcp-Name");
+  const supported = ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26"];
+
+  if (!methodHeader || methodHeader !== method) {
+    return json({ jsonrpc: "2.0", id, error: { code: -32600, message: "Mcp-Method header must match the JSON-RPC method." } }, 400);
   }
+  const protocolVersion = headerVersion || (bodyVersion === "2025-03-26" ? bodyVersion : null);
+  if (!protocolVersion || !supported.includes(protocolVersion)) {
+    return json({ jsonrpc: "2.0", id, error: { code: -32600, message: "Unsupported or missing MCP-Protocol-Version.", data: { supportedVersions: supported } } }, 400);
+  }
+  if (headerVersion && bodyVersion && headerVersion !== bodyVersion) {
+    return json({ jsonrpc: "2.0", id, error: { code: -32600, message: "MCP-Protocol-Version does not match request metadata." } }, 400);
+  }
+  if (protocolVersion !== "2025-03-26" && bodyVersion !== protocolVersion) {
+    return json({ jsonrpc: "2.0", id, error: { code: -32600, message: "Request metadata must include the matching io.modelcontextprotocol/protocolVersion." } }, 400);
+  }
+  if (method === "tools/call" && (!nameHeader || nameHeader !== params.name)) {
+    return json({ jsonrpc: "2.0", id, error: { code: -32600, message: "Mcp-Name header must match params.name for tools/call." } }, 400);
+  }
+
+  if (method === "notifications/initialized") return new Response(null, { status: 202 });
   if (method === "initialize") {
-    const requested = payload.params?.protocolVersion || MCP_PROTOCOL_VERSION;
-    const supported = ["2025-11-25", "2025-06-18", "2025-03-26"];
-    const protocolVersion = supported.includes(requested) ? requested : MCP_PROTOCOL_VERSION;
     return json({
       jsonrpc: "2.0", id,
       result: {
@@ -146,12 +164,11 @@ async function handleMcp(request, env) {
     return json({ jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found." } }, 404);
   }
 
-  const toolName = payload.params?.name;
-  const args = payload.params?.arguments || {};
+  const toolName = params.name;
+  const args = params.arguments || {};
   if (!isObject(args) || typeof args.roomId !== "string") {
     return json({ jsonrpc: "2.0", id, result: { isError: true, content: [{ type: "text", text: "roomId is required." }] } });
   }
-
   const routes = {
     murmur_get_messages: ["GET", "/messages" + (args.after ? "?after=" + encodeURIComponent(args.after) : "") + (args.limit ? (args.after ? "&" : "?") + "limit=" + encodeURIComponent(args.limit) : "") + (args.channel ? ((args.after || args.limit) ? "&" : "?") + "channel=" + encodeURIComponent(args.channel) : "")],
     murmur_send_message: ["POST", "/messages"],
@@ -162,13 +179,10 @@ async function handleMcp(request, env) {
   if (!route) {
     return json({ jsonrpc: "2.0", id, result: { isError: true, content: [{ type: "text", text: "Unknown tool." }] } });
   }
-
   const headers = new Headers();
   const authorization = request.headers.get("Authorization");
   if (authorization) headers.set("Authorization", authorization);
-  if (toolName === "murmur_send_message") {
-    headers.set("content-type", "application/json");
-  }
+  if (toolName === "murmur_send_message") headers.set("content-type", "application/json");
   const response = await proxyRoom(env, args.roomId, route[1], new Request("https://room.internal" + route[1], {
     method: route[0],
     headers,
@@ -181,6 +195,11 @@ async function handleMcp(request, env) {
       isError: !response.ok,
       structuredContent: result,
       content: [{ type: "text", text: JSON.stringify(result) }]
+    }
+  });
+}
+
+lt) }]
     }
   });
 }
