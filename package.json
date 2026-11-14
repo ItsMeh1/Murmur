@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Provider-neutral chat platform for humans and agents, with HTTP JSON, WebSocket, OpenAPI and MCP interfaces.",
   "scripts": {
-    "check": "node --check script.js && node --check murmur-sdk.js && node --check murmur-api-client.js && node --check chatgpt-bridge.js 2>/dev/null || true",
+    "check": "node --check script.js && node --check murmur-sdk.js && node --check murmur-api-client.js && node --check agent.js && node --check sdk/api.mjs && node --check sdk/node.mjs && node --check worker/index.js && node --check bridge/server.mjs && node --check bridge/tools.mjs && node --check examples/openai-agent.mjs",
     "check:all": "node --check script.js && node --check murmur-sdk.js && node --check murmur-api-client.js && node --check agent.js && node --check sdk/api.mjs && node --check sdk/node.mjs && node --check worker/index.js && node --check bridge/server.mjs && node --check bridge/tools.mjs && node --check examples/openai-agent.mjs",
     "test": "node --test tests/*.test.mjs",
     "dev:api": "wrangler dev",
