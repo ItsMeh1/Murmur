@@ -108,7 +108,15 @@ export class MurmurClient extends EventEmitter {
             clearTimeout(timer);
             reject(new Error("Socket closed before welcome (" + event.code + ")."));
           }
-          if (wasConnected) this.emit("disconnected", { code: event.code });
+          if (wasConnected && !this._closing) {
+          this.emit("transportFallback", { transport: "http-polling", reason: "WebSocket disconnected." });
+          this.startPolling("WebSocket disconnected").catch(error => {
+            this.emit("clientError", error);
+            this.emit("disconnected", { code: event.code, reason: error.message });
+          });
+        } else if (wasConnected) {
+          this.emit("disconnected", { code: event.code });
+        }
         });
       });
     } catch (error) {
