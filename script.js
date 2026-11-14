@@ -527,12 +527,13 @@ document.querySelectorAll(".channel").forEach(button => {
 pillEl.addEventListener("click", () => switchChannel("pending"));
 
 
-// ---------- NETWORK (PeerJS / WebRTC, no Murmur backend) ----------
-// The room creator's browser is the room host. PeerJS Cloud only performs
-// signaling; chat packets travel directly between connected browsers.
+// ---------- NETWORK (Murmur HTTP/JSON API) ----------
+// The API is the source of truth. WebSocket is optional; the client falls
+// back to cursor-based HTTP polling and REST writes when necessary.
 
 let client = null;
 let currentInviteToken = null;
+let currentTransport = "websocket";
 
 const connectEl = document.getElementById("connect");
 const connectMsgEl = document.getElementById("connect-msg");
@@ -562,20 +563,23 @@ function enterRoom(label, roomId) {
 
 function ingestServerMessage(raw) {
   if (!raw || !state.messages[raw.channel]) return;
+  const timestamp = raw.createdAt || raw.time || Date.now();
+
   if (raw.widget) {
     addWidget(raw.author, raw.widget.type, raw.widget.data, raw.channel, raw.id);
     const saved = findMessage(raw.id);
     if (saved) {
-      saved.time = new Date(raw.time || Date.now());
+      saved.time = new Date(timestamp);
       saved.sender = raw.sender || null;
       saved.widget.result = raw.widget.result || null;
     }
     renderMessages();
     return;
   }
+
   addMessage(raw.channel, raw.author, raw.text || "", {
     id: raw.id,
-    time: raw.time,
+    time: timestamp,
     target: raw.target,
     mentions: raw.mentions,
     sender: raw.sender
@@ -608,7 +612,7 @@ function handleRoomEvent(event) {
 
   if (event.type === "widget.resolved") {
     const message = findMessage(event.id);
-    if (message && message.widget) {
+    if (message?.widget) {
       message.widget.result = event.result;
       renderMessages();
       renderBadges();
@@ -640,7 +644,7 @@ function handleRoomEvent(event) {
   }
 
   if (event.type === "room.closed") {
-    setRoomStatus("Room host closed the room", false);
+    setRoomStatus("Room closed", false);
     return;
   }
 
@@ -653,22 +657,47 @@ function handleRoomEvent(event) {
 
 function bindClient(nextClient) {
   client = nextClient;
+  currentTransport = "websocket";
   client.on("event", handleRoomEvent);
+  client.on("transportFallback", detail => {
+    currentTransport = detail?.transport === "http-polling" ? "HTTP polling" : "WebSocket";
+    if (connectEl.hidden) setRoomStatus("Connected · " + currentTransport, true);
+  });
   client.on("disconnected", detail => {
     setRoomStatus(detail?.reason || "Disconnected", false);
   });
-  client.on("peerError", error => {
-    const message = error?.type === "network" || error?.type === "socket-error"
-      ? "PeerJS signaling is unavailable. Check your connection and try again."
-      : (error?.message || error?.type || "Peer connection error.");
+  client.on("clientError", error => {
+    const message = error?.message || "Murmur client error.";
     if (connectEl.hidden) setRoomStatus(message, false);
     else setConnectMessage(message, true);
   });
-  client.on("serverError", event => setRoomStatus(event.error || "Connection error", false));
+  client.on("serverError", event => {
+    const message = event?.error || "Murmur API error.";
+    if (connectEl.hidden) setRoomStatus(message, false);
+    else setConnectMessage(message, true);
+  });
 }
 
-async function connectToRoom(roomId, token, name = "You", kind = "human") {
-  setConnectMessage("Connecting to room…");
+function saveSession(roomId, inviteCode, name, kind, accessToken) {
+  sessionStorage.setItem("murmur.room", roomId);
+  sessionStorage.setItem("murmur.inviteToken", inviteCode);
+  sessionStorage.setItem("murmur.name", name);
+  sessionStorage.setItem("murmur.kind", kind);
+  if (accessToken) sessionStorage.setItem("murmur.apiAccessToken", accessToken);
+}
+
+async function loadRoomState(nextClient) {
+  const history = await nextClient.getHistory({ limit: 300 });
+  replaceHistory(history.messages || []);
+  const roster = await nextClient.getMembers();
+  state.agents = (roster.members || [])
+    .filter(member => member.name !== "You")
+    .map(member => member.name);
+  renderAgents();
+}
+
+async function connectToRoom(roomId, inviteCode, name = "You", kind = "human") {
+  setConnectMessage("Connecting to Murmur…");
   setRoomStatus("Connecting…", false);
   hostButton.disabled = true;
   joinButton.disabled = true;
@@ -677,22 +706,11 @@ async function connectToRoom(roomId, token, name = "You", kind = "human") {
     client?.close();
     const nextClient = createMurmurClient();
     bindClient(nextClient);
-    await nextClient.connect({ room: roomId, token, name, kind });
-    const history = await nextClient.getHistory({ limit: 300 });
-    replaceHistory(history.messages || []);
-    const roster = await nextClient.getMembers();
-    state.agents = (roster.members || [])
-      .filter(member => member.name !== "You")
-      .map(member => member.name);
-    renderAgents();
-
-    sessionStorage.setItem("murmur.room", roomId);
-    sessionStorage.setItem("murmur.inviteToken", token);
-    sessionStorage.setItem("murmur.name", name);
-    sessionStorage.setItem("murmur.kind", kind);
-    if (nextClient.accessToken) sessionStorage.setItem("murmur.apiAccessToken", nextClient.accessToken);
-    currentInviteToken = token;
-    enterRoom(window.MURMUR_CONFIG?.apiBase ? "Connected · shared API" : "Connected · peer-to-peer", roomId);
+    await nextClient.connect({ room: roomId, token: inviteCode, name, kind });
+    await loadRoomState(nextClient);
+    saveSession(roomId, inviteCode, name, kind, nextClient.accessToken);
+    currentInviteToken = inviteCode;
+    enterRoom("Connected · shared API · " + currentTransport, roomId);
     setConnectMessage("");
   } catch (error) {
     setRoomStatus("Not connected", false);
@@ -705,43 +723,24 @@ async function connectToRoom(roomId, token, name = "You", kind = "human") {
 }
 
 async function createRoom() {
-  setConnectMessage(window.MURMUR_CONFIG?.apiBase ? "Creating a shared room…" : "Opening a peer-to-peer room…");
+  if (!window.MURMUR_CONFIG?.apiBase) {
+    setConnectMessage("The shared Murmur API is not configured yet. Deploy the API and set apiBase in murmur-config.js.", true);
+    return;
+  }
+
+  setConnectMessage("Creating a shared room…");
   hostButton.disabled = true;
   joinButton.disabled = true;
 
-  const savedRoom = localStorage.getItem("murmur.hostRoom");
-  const savedToken = localStorage.getItem("murmur.hostToken");
   try {
     client?.close();
-    let nextClient = createMurmurClient();
+    const nextClient = createMurmurClient();
     bindClient(nextClient);
-    let created;
-    try {
-      created = await nextClient.createRoom({ roomId: savedRoom || undefined, token: savedToken || undefined });
-    } catch (error) {
-      // The saved peer ID may still be registered in another open tab.
-      if (!savedRoom || error?.type !== "unavailable-id") throw error;
-      nextClient.close();
-      nextClient = createMurmurClient();
-      bindClient(nextClient);
-      created = await nextClient.createRoom();
-    }
-
+    const created = await nextClient.createRoom({ name: "You" });
     currentInviteToken = created.inviteToken;
-    localStorage.setItem("murmur.hostRoom", created.roomId);
-    localStorage.setItem("murmur.hostToken", created.inviteToken);
-    sessionStorage.setItem("murmur.room", created.roomId);
-    sessionStorage.setItem("murmur.inviteToken", created.inviteToken);
-    sessionStorage.setItem("murmur.name", "You");
-    sessionStorage.setItem("murmur.kind", "human");
-    if (nextClient.accessToken) sessionStorage.setItem("murmur.apiAccessToken", nextClient.accessToken);
-
-    const history = await nextClient.getHistory({ limit: 300 });
-    replaceHistory(history.messages || []);
-    const roster = await nextClient.getMembers();
-    state.agents = (roster.members || []).filter(member => member.name !== "You").map(member => member.name);
-    renderAgents();
-    enterRoom(window.MURMUR_CONFIG?.apiBase ? "Room online · shared API" : "Room host online · peer-to-peer", created.roomId);
+    saveSession(created.roomId, created.inviteToken, "You", "human", created.accessToken);
+    await loadRoomState(nextClient);
+    enterRoom("Room online · shared API · " + currentTransport, created.roomId);
     setConnectMessage("");
   } catch (error) {
     setConnectMessage(error.message || "Couldn't create a room.", true);
@@ -754,14 +753,14 @@ async function createRoom() {
 
 async function joinRoom() {
   const roomId = document.getElementById("join-room").value.trim();
-  const token = document.getElementById("join-token").value.trim();
+  const inviteCode = document.getElementById("join-token").value.trim();
   const name = document.getElementById("join-name").value.trim();
-  if (!roomId || !token || !name) {
-    setConnectMessage("Enter the room ID, invite key and your name.", true);
+  if (!roomId || !inviteCode || !name) {
+    setConnectMessage("Enter the room ID, invite code and your name.", true);
     return;
   }
   try {
-    await connectToRoom(roomId, token, name, "human");
+    await connectToRoom(roomId, inviteCode, name, "human");
   } catch {
     // connectToRoom already displays the useful error.
   }
@@ -815,48 +814,35 @@ switchChannel("general");
 const query = new URLSearchParams(location.search);
 const fragment = new URLSearchParams(location.hash.slice(1));
 const invitedRoom = fragment.get("room") || query.get("room");
-const invitedKey = fragment.get("key") || query.get("key");
+const invitedCode = fragment.get("key") || query.get("key");
 if (invitedRoom) document.getElementById("join-room").value = invitedRoom;
-if (invitedKey) document.getElementById("join-token").value = invitedKey;
-if (invitedRoom && invitedKey) document.getElementById("join-name").focus();
+if (invitedCode) document.getElementById("join-token").value = invitedCode;
+if (invitedRoom && invitedCode) document.getElementById("join-name").focus();
 
-// Resume this browser's last room as a host or participant when the tab reloads.
-const savedRoom = sessionStorage.getItem("murmur.room");
-const savedToken = sessionStorage.getItem("murmur.inviteToken");
-const savedName = sessionStorage.getItem("murmur.name");
-const savedKind = sessionStorage.getItem("murmur.kind");
-async function resumeSavedRoom(roomId, inviteCode, name, kind, accessToken) {
+async function resumeSavedRoom(roomId, inviteCode, accessToken) {
   try {
-    client?.close();
     const nextClient = createMurmurClient();
-    if (typeof nextClient.resume !== "function") throw new Error("This transport cannot resume sessions.");
     bindClient(nextClient);
     await nextClient.resume({ room: roomId, inviteCode, accessToken });
-    const history = await nextClient.getHistory({ limit: 300 });
-    replaceHistory(history.messages || []);
-    const roster = await nextClient.getMembers();
-    state.agents = (roster.members || []).filter(member => member.name !== "You").map(member => member.name);
-    renderAgents();
+    await loadRoomState(nextClient);
     currentInviteToken = inviteCode;
-    enterRoom(window.MURMUR_CONFIG?.apiBase ? "Reconnected · shared API" : "Reconnected", roomId);
+    enterRoom("Reconnected · shared API · " + currentTransport, roomId);
     setConnectMessage("");
   } catch (error) {
     sessionStorage.removeItem("murmur.apiAccessToken");
-    setConnectMessage("Couldn't resume the saved room: " + (error.message || "session expired"), true);
+    setConnectMessage("Couldn't resume the saved room: " + (error.message || "session expired") + ". Rejoin using the invite form.", true);
   }
 }
 
-if (savedRoom && savedToken && savedName && window.MURMUR_CONFIG?.apiBase) {
-  const apiAccessToken = sessionStorage.getItem("murmur.apiAccessToken");
-  if (apiAccessToken) {
-    resumeSavedRoom(savedRoom, savedToken, savedName, savedKind || "human", apiAccessToken);
-  } else if (savedName === "You" && savedRoom === localStorage.getItem("murmur.hostRoom")) {
-    createRoom();
-  } else {
-    connectToRoom(savedRoom, savedToken, savedName, savedKind || "human").catch(() => {});
-  }
-} else if (savedRoom && savedToken && savedName === "You" && savedRoom === localStorage.getItem("murmur.hostRoom")) {
-  createRoom();
-} else if (savedRoom && savedToken && savedName) {
-  connectToRoom(savedRoom, savedToken, savedName, savedKind || "human").catch(() => {});
+const savedRoom = sessionStorage.getItem("murmur.room");
+const savedInviteCode = sessionStorage.getItem("murmur.inviteToken");
+const savedAccessToken = sessionStorage.getItem("murmur.apiAccessToken");
+if (!window.MURMUR_CONFIG?.apiBase) {
+  setConnectMessage("Murmur's shared API is not configured. Deploy the API and set apiBase in murmur-config.js before creating or joining rooms.", true);
+} else if (savedRoom && savedInviteCode && savedAccessToken) {
+  resumeSavedRoom(savedRoom, savedInviteCode, savedAccessToken);
+} else if (savedRoom && savedInviteCode) {
+  document.getElementById("join-room").value = savedRoom;
+  document.getElementById("join-token").value = savedInviteCode;
+  setConnectMessage("Your saved participant session is unavailable. Rejoin using a fresh participant name.");
 }
