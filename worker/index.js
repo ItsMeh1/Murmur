@@ -313,7 +313,7 @@ export class MurmurRoom extends DurableObject {
       widgets: {},
       tickets: {}
     });
-    return json({ roomId: body.roomId, inviteCode: body.inviteCode, accessToken: body.ownerToken, member: owner });
+    return json({ roomId: body.roomId, inviteCode: body.inviteCode, accessToken: body.ownerToken, member: owner }, 201);
   }
 
   async _join(request) {
