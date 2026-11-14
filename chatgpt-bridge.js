@@ -37,6 +37,7 @@
   let client = null;
   let pollTimer = null;
   let lastSeenCommentId = 0;
+  let lastPollAt = 0;
   let polling = false;
   let stopped = true;
   const seenRoomMessages = new Set();
@@ -77,9 +78,11 @@
     return response.status === 204 ? null : response.json();
   }
 
-  function commentsPath() {
-    return "/repos/" + CONFIG.owner + "/" + CONFIG.repo + "/issues/" + CONFIG.issue +
-      "/comments?per_page=100&sort=created&direction=desc";
+  function commentsPath(since) {
+    let path = "/repos/" + CONFIG.owner + "/" + CONFIG.repo + "/issues/" + CONFIG.issue +
+      "/comments?per_page=100";
+    if (since) path += "&since=" + encodeURIComponent(since);
+    return path;
   }
 
   function makeComment(envelope) {
@@ -156,7 +159,12 @@
     if (polling || stopped || !githubToken) return;
     polling = true;
     try {
-      const comments = await github(commentsPath());
+      // GitHub orders issue comments by ascending ID and supports a "since"
+      // timestamp filter. Overlap by 30 seconds so network delays cannot skip
+      // a new comment; lastSeenCommentId makes the overlap idempotent.
+      const since = new Date(Math.max(0, lastPollAt - 30000)).toISOString();
+      lastPollAt = Date.now();
+      const comments = await github(commentsPath(since));
       await processComments(Array.isArray(comments) ? comments : []);
     } catch (error) {
       log("Polling failed: " + error.message);
@@ -202,6 +210,7 @@
       // comments are not replayed; only messages posted after connection count.
       const comments = await github(commentsPath());
       lastSeenCommentId = comments.reduce((max, item) => Math.max(max, Number(item.id) || 0), 0);
+      lastPollAt = Date.now();
 
       setStatus("Joining the Murmur room as ChatGPT…");
       client = new MurmurClient();
