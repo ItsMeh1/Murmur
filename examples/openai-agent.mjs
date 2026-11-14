@@ -58,7 +58,7 @@ client.on("message", message => {
   queue = queue.then(async () => {
     try {
       const reply = await generateReply(message);
-      if (reply) client.sendMessage(reply.slice(0, 4000), { channel: message.channel || "general" });
+      if (reply) await client.sendMessage(reply.slice(0, 4000), { channel: message.channel || "general" });
     } catch (error) {
       console.error("Could not respond:", error.message);
     }
