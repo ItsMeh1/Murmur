@@ -690,8 +690,9 @@ async function connectToRoom(roomId, token, name = "You", kind = "human") {
     sessionStorage.setItem("murmur.inviteToken", token);
     sessionStorage.setItem("murmur.name", name);
     sessionStorage.setItem("murmur.kind", kind);
+    if (nextClient.accessToken) sessionStorage.setItem("murmur.apiAccessToken", nextClient.accessToken);
     currentInviteToken = token;
-    enterRoom("Connected · peer-to-peer", roomId);
+    enterRoom(window.MURMUR_CONFIG?.apiBase ? "Connected · shared API" : "Connected · peer-to-peer", roomId);
     setConnectMessage("");
   } catch (error) {
     setRoomStatus("Not connected", false);
@@ -733,13 +734,14 @@ async function createRoom() {
     sessionStorage.setItem("murmur.inviteToken", created.inviteToken);
     sessionStorage.setItem("murmur.name", "You");
     sessionStorage.setItem("murmur.kind", "human");
+    if (nextClient.accessToken) sessionStorage.setItem("murmur.apiAccessToken", nextClient.accessToken);
 
     const history = await nextClient.getHistory({ limit: 300 });
     replaceHistory(history.messages || []);
     const roster = await nextClient.getMembers();
     state.agents = (roster.members || []).filter(member => member.name !== "You").map(member => member.name);
     renderAgents();
-    enterRoom("Room host online · peer-to-peer", created.roomId);
+    enterRoom(window.MURMUR_CONFIG?.apiBase ? "Room online · shared API" : "Room host online · peer-to-peer", created.roomId);
     setConnectMessage("");
   } catch (error) {
     setConnectMessage(error.message || "Couldn't create a room.", true);
@@ -823,7 +825,37 @@ const savedRoom = sessionStorage.getItem("murmur.room");
 const savedToken = sessionStorage.getItem("murmur.inviteToken");
 const savedName = sessionStorage.getItem("murmur.name");
 const savedKind = sessionStorage.getItem("murmur.kind");
-if (savedRoom && savedToken && savedName === "You" && savedRoom === localStorage.getItem("murmur.hostRoom")) {
+async function resumeSavedRoom(roomId, inviteCode, name, kind, accessToken) {
+  try {
+    client?.close();
+    const nextClient = createMurmurClient();
+    if (typeof nextClient.resume !== "function") throw new Error("This transport cannot resume sessions.");
+    bindClient(nextClient);
+    await nextClient.resume({ room: roomId, inviteCode, accessToken });
+    const history = await nextClient.getHistory({ limit: 300 });
+    replaceHistory(history.messages || []);
+    const roster = await nextClient.getMembers();
+    state.agents = (roster.members || []).filter(member => member.name !== "You").map(member => member.name);
+    renderAgents();
+    currentInviteToken = inviteCode;
+    enterRoom(window.MURMUR_CONFIG?.apiBase ? "Reconnected · shared API" : "Reconnected", roomId);
+    setConnectMessage("");
+  } catch (error) {
+    sessionStorage.removeItem("murmur.apiAccessToken");
+    setConnectMessage("Couldn't resume the saved room: " + (error.message || "session expired"), true);
+  }
+}
+
+if (savedRoom && savedToken && savedName && window.MURMUR_CONFIG?.apiBase) {
+  const apiAccessToken = sessionStorage.getItem("murmur.apiAccessToken");
+  if (apiAccessToken) {
+    resumeSavedRoom(savedRoom, savedToken, savedName, savedKind || "human", apiAccessToken);
+  } else if (savedName === "You" && savedRoom === localStorage.getItem("murmur.hostRoom")) {
+    createRoom();
+  } else {
+    connectToRoom(savedRoom, savedToken, savedName, savedKind || "human").catch(() => {});
+  }
+} else if (savedRoom && savedToken && savedName === "You" && savedRoom === localStorage.getItem("murmur.hostRoom")) {
   createRoom();
 } else if (savedRoom && savedToken && savedName) {
   connectToRoom(savedRoom, savedToken, savedName, savedKind || "human").catch(() => {});
