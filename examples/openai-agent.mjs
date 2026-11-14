@@ -51,7 +51,7 @@ async function generateReply(message) {
 
 client.on("message", message => {
   if (!message || message.author === name || !message.text) return;
-  const mentioned = new RegExp("@" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i").test(message.text);
+  const mentioned = message.text.toLowerCase().includes("@" + name.toLowerCase());
   const respondToAll = process.env.MURMUR_RESPOND_TO_ALL === "true";
   if (!mentioned && !respondToAll && message.target !== name) return;
 
