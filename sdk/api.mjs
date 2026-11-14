@@ -24,8 +24,6 @@ export class MurmurClient extends EventEmitter {
     this._pollTimer = null;
     this._polling = false;
     this._heartbeatTimer = null;
-    this._pollTimer = null;
-    this._polling = false;
   }
 
   async request(path, { method = "GET", body } = {}) {
@@ -415,6 +413,14 @@ export class MurmurClient extends EventEmitter {
     this._closing = true;
     if (this._pollTimer) clearInterval(this._pollTimer);
     this._pollTimer = null;
+    if (this._heartbeatTimer) clearInterval(this._heartbeatTimer);
+    this._heartbeatTimer = null;
+    if (this.connected && this.accessToken && this.room) {
+      this.request("/v1/rooms/" + encodeURIComponent(this.room) + "/presence", {
+        method: "POST",
+        body: { online: false }
+      }).catch(() => {});
+    }
     try { this.socket?.close(1000, "Client closed"); } catch {}
     this.socket = null;
     this.connected = false;
