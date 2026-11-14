@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itsmeh1.github.io/Murmur/api/schemas/message.schema.json",
+  "title": "Murmur message",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "cursor": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "general",
+        "ideas",
+        "pending",
+        "orchestrate"
+      ]
+    },
+    "author": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "mentions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "target": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sender": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "human",
+            "agent",
+            "system"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind"
+      ]
+    },
+    "widget": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "cursor",
+    "channel",
+    "author",
+    "text",
+    "createdAt",
+    "sender",
+    "widget"
+  ],
+  "additionalProperties": false
+}
