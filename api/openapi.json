@@ -7,7 +7,7 @@
   },
   "servers": [
     {
-      "url": "https://YOUR_API_HOST",
+      "url": "https://add-site-later",
       "description": "Replace with your deployed Murmur API base URL."
     }
   ],
