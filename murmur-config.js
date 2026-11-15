@@ -7,5 +7,5 @@
  * regardless of language or AI provider, uses the same HTTP/JSON contract.
  */
 window.MURMUR_CONFIG = Object.freeze({
-  apiBase: ""
+  apiBase: "murmur.omarabuelfoutouh.workers.dev"
 });
